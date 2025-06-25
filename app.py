@@ -3,6 +3,7 @@ from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import os
+import random
 
 app = Flask(__name__)
 
@@ -12,6 +13,12 @@ LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
+
+ANATOMY_QUESTIONS = [
+    "鎖骨の外側端はどの骨と関節を形成しますか？",
+    "脳神経はいくつありますか？",
+    "大腿四頭筋を構成する筋肉を4つ挙げてください。",
+]
 
 @app.route("/webhook", methods=['POST'])
 def webhook():
@@ -30,6 +37,8 @@ def handle_message(event):
     user_message = event.message.text
     if "こんにちは" in user_message:
         reply_text = "こんにちは、今日も解剖がんばろう！"
+    elif user_message.strip() == "解剖の問題":
+        reply_text = random.choice(ANATOMY_QUESTIONS)
     else:
         reply_text = "ごめんね、まだその言葉は覚えてないの💦"
 
