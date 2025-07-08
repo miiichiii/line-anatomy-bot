@@ -66,7 +66,7 @@ def handle_message(event):
     user_message = event.message.text.strip()
 
     if "こんにちは" in user_message:
-        reply_text = "こんにちは、今日も解剖がんばろう！"
+        reply_text = "こんちくは、今日も解剖がんばろう！"
     elif user_message == "解剖の問題":
         reply_text = random.choice(ANATOMY_QUESTIONS)
     else:
