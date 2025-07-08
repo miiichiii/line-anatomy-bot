@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>位置情報送信</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* A simple animation for the loading spinner */
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .spinner {
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center h-screen font-sans">
+    <div id="app" class="text-center p-8 bg-white rounded-lg shadow-md max-w-sm w-full">
+        <!-- Loading State -->
+        <div id="loading">
+            <div class="spinner w-12 h-12 border-4 border-blue-500 rounded-full mx-auto"></div>
+            <p class="mt-4 text-gray-600">準備中です...</p>
+        </div>
+
+        <!-- Ready State -->
+        <div id="ready" class="hidden">
+            <h1 class="text-2xl font-bold mb-2 text-gray-800">出席登録</h1>
+            <p class="mb-6 text-gray-600">下のボタンを押して、現在の位置情報を送信してください。</p>
+            <button id="sendLocationBtn" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-lg transition duration-300 ease-in-out transform hover:scale-105">
+                現在地を送信して出席
+            </button>
+        </div>
+
+        <!-- Error State -->
+        <div id="error" class="hidden">
+            <h1 class="text-xl font-bold text-red-600 mb-2">エラー</h1>
+            <p id="errorMessage" class="text-gray-700"></p>
+        </div>
+    </div>
+
+    <!-- LIFF SDK -->
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <script>
+        // --- Main execution ---
+        document.addEventListener('DOMContentLoaded', () => {
+            main();
+        });
+
+        async function main() {
+            try {
+                // 1. Initialize LIFF
+                // Replace 'YOUR_LIFF_ID' with your actual LIFF ID from the LINE Developers Console.
+                await liff.init({ liffId: "YOUR_LIFF_ID" });
+
+                // 2. Check if the user is logged in
+                if (!liff.isLoggedIn()) {
+                    // If not logged in, it will try to log in.
+                    // This will cause a page reload, so the rest of the code won't execute on the first run.
+                    liff.login();
+                    return; 
+                }
+
+                // If initialization is successful, show the main content
+                showReadyState();
+
+            } catch (err) {
+                console.error(err);
+                showErrorState(`LIFFの初期化に失敗しました: ${err.message}`);
+            }
+        }
+
+        function showReadyState() {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('ready').classList.remove('hidden');
+            
+            const sendButton = document.getElementById('sendLocationBtn');
+            sendButton.addEventListener('click', handleSendLocation);
+        }
+
+        function showErrorState(message) {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('ready').classList.add('hidden');
+            const errorDiv = document.getElementById('error');
+            const errorMessageP = document.getElementById('errorMessage');
+            errorMessageP.textContent = message;
+            errorDiv.classList.remove('hidden');
+        }
+
+        async function handleSendLocation() {
+            try {
+                // 3. Get the user's current location (cannot be spoofed)
+                const location = await liff.getLocation();
+
+                // 4. Send the location message back to the chat
+                await liff.sendMessages([
+                    {
+                        type: 'location',
+                        title: '現在地',
+                        address: '（GPS座標）', // This address is not used by the backend
+                        latitude: location.latitude,
+                        longitude: location.longitude
+                    }
+                ]);
+
+                // 5. Close the LIFF window
+                liff.closeWindow();
+
+            } catch (err) {
+                console.error(err);
+                // Handle common errors like permission denial
+                if (err.code === 'PERMISSION_DENIED') {
+                    showErrorState('位置情報の取得が許可されませんでした。ブラウザまたはOSの設定で位置情報へのアクセスを許可してください。');
+                } else {
+                    showErrorState(`位置情報の取得または送信に失敗しました: ${err.message}`);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
+```
+
+**【重要】**
+このHTMLファイル内の `YOUR_LIFF_ID` という部分は、後ほどステップ3で取得する実際のLIFF IDに書き換える必要があります。
+
+---
+
+### ステップ2: HTMLファイルのホスティング
+
+作成した `liff_location.html` をWeb上に公開します。Renderをお使いなので、新しい**静的サイト（Static Site）**を無料で作成するのが最も簡単です。
+
+1.  GitHubに新しいリポジトリを作成し、`liff_location.html` をプッシュします。
+2.  Renderのダッシュボードで「New +」→「Static Site」を選択します。
+3.  先ほど作成したGitHubリポジトリを連携させます。
+4.  デプロイが完了すると、`https://your-site-name.onrender.com` のようなURLが発行されます。これがLIFFアプリのURLになります。
+
+---
+
+### ステップ3: LIFFアプリの登録
+
+次に、LINE DevelopersコンソールでLIFFアプリを登録します。
+
+1.  [LINE Developersコンソール](https://developers.line.biz/console/)にログインします。
+2.  利用中のプロバイダーとチャネルを選択します。
+3.  「LIFF」タブを開き、「追加」ボタンを押します。
+4.  以下の項目を入力します。
+    * **LIFFアプリ名**: `位置情報取得` など、分かりやすい名前
+    * **サイズ**: `Compact` (縦長の小さなウィンドウ)
+    * **エンドポイントURL**: ステップ2で取得したURL (`https://....onrender.com/liff_location.html`)
+    * **Scope**: `chat_message.write` にチェックを入れます。（LIFFからメッセージを送信するために必須です）
+    * **ボットリンク機能**: `On (Aggressive)` を選択します。
+5.  「追加」ボタンを押すと、`liff.line.me/12345-abcde` のような **LIFF URL** と、`12345-abcde` という **LIFF ID** が発行されます。
+
+**ここで、ステップ1で作成した `liff_location.html` の `YOUR_LIFF_ID` を、今発行されたLIFF IDに書き換えて、再度GitHubにプッシュしてください。**
+
+---
+
+### ステップ4: Pythonコードの修正
+
+最後に、Flaskアプリ（`app.py`）を修正し、「出席」と入力されたときにLIFFアプリを開くボタンを送信するようにします。
+
+`handle_text` 関数内の `if text == "出席":` の部分を以下のように書き換えます。`QuickReply` の代わりに `TemplateSendMessage` を使います。
+
+
+```python
+# 必要なモジュールをインポートリストに追加
+from linebot.models import (
+    MessageEvent, TextMessage, TextSendMessage,
+    LocationMessage,
+    # --- 削除 ---
+    # QuickReply, QuickReplyButton, LocationAction
+    # --- 追加 ---
+    TemplateSendMessage, ButtonsTemplate, URIAction
+)
+
+# ... (他のコードはそのまま) ...
+
+@handler.add(MessageEvent, message=TextMessage)
+def handle_text(event):
+    """ テキストメッセージを受信したときの処理 """
+    global expected_code
+
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    # ここから下の部分を書き換える
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+    # ステップ3で取得したLIFF URLをここに設定
+    LIFF_URL = "https://liff.line.me/xxxxxxxx-xxxxxxxx" # 必ずご自身のLIFF URLに書き換えてください
+
+    text = event.message.text.strip()
+    user_id = event.source.user_id
+
+    # 1) 「出席」というキーワードでプロセスを開始
+    if text == "出席":
+        # 4桁のランダムなワンタイムコードを生成
+        expected_code = f"{random.randint(0, 9999):04d}"
+        
+        # LIFFアプリを開くボタンを作成
+        buttons_template = ButtonsTemplate(
+            title='出席登録',
+            text=f"スライドに表示されている4桁コード: {expected_code}\n\n下のボタンを押して、現在地を送信してください。",
+            actions=[
+                URIAction(
+                    label='現在地を送信する',
+                    uri=LIFF_URL
+                )
+            ]
+        )
+        
+        line_bot_api.reply_message(
+            event.reply_token,
+            TemplateSendMessage(
+                alt_text='出席登録を開始します。スマートフォンでご確認ください。',
+                template=buttons_template
+            )
+        )
+        return
+    
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    # ここから上の部分を書き換える
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+    # 3) 4桁の数字（コード）が入力された場合の処理 (この部分は変更なし)
+    if text.isdigit() and len(text) == 4:
+        if expected_code is None:
+            reply = "先に「出席」と入力してからコードを送信してください。"
+        elif text != expected_code:
+            reply = "❌ コードが正しくありません。もう一度確認してください。"
+        else:
+            loc = location_store.get(user_id)
+            if not loc:
+                reply = "❌ まだ位置情報を受け取っていません。「現在地を送信する」ボタンを押してください。"
+            else:
+                d = distance(loc["lat"], loc["lng"], CLASS_LAT, CLASS_LNG)
+                if d <= RADIUS_M:
+                    reply = "✅ 出席登録を完了しました。"
+                else:
+                    reply = f"❌ 教室の範囲外です（約{int(d)}m 離れています）。"
+        
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        return
+
+    # 上記のどの条件にも当てはまらないテキストが送信された場合 (この部分は変更なし)
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text="「出席」と入力すると出席登録が始まります。")
+    )
