@@ -30,10 +30,7 @@ RADIUS_M = 300
 
 # --- Google Sheets 設定 ---
 SPREADSHEET_NAME = "解剖学出席簿"
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-# ★【要設定】記録に使うシート（タブ）の名前を、ご自身で設定した名前にしてください ★
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-SHEET_NAME = "出席簿" # 例: "シート1", "出席簿" など
+SHEET_NAME = "出席簿"
 
 client = None
 try:
@@ -58,14 +55,12 @@ def distance(lat1, lng1, lat2, lng2):
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 def get_student_info(user_id):
-    """ シートからユーザーIDを検索し、登録情報（学籍番号と氏名）を返す """
     if not client: return None
     try:
         sheet = client.open(SPREADSHEET_NAME).worksheet(SHEET_NAME)
-        # B列（LINE User ID）を検索し、登録記録を探す
         all_records = sheet.get_all_records()
-        for record in reversed(all_records): # 新しい記録から探す
-            if record.get('LINE User ID') == user_id and record.get('種別') == '登録':
+        for record in reversed(all_records):
+            if record.get('LINE User ID') == user_id:
                 return {"student_id": record.get('学籍番号'), "name": record.get('氏名')}
         return None
     except Exception as e:
@@ -73,7 +68,6 @@ def get_student_info(user_id):
         return None
 
 def record_event(user_id, student_id, name, event_type):
-    """ シートにイベント（登録 or 出席）を記録する """
     if not client: return False
     try:
         sheet = client.open(SPREADSHEET_NAME).worksheet(SHEET_NAME)
@@ -119,14 +113,10 @@ def handle_text(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="次に、氏名をフルネームで送信してください。"))
     
     elif current_state == 'awaiting_name':
-        student_id = user_states[user_id]['student_id']
-        name = text
-        # 種別「登録」として記録
-        if record_event(user_id, student_id, name, "登録"):
-            del user_states[user_id]
-            send_liff_button(event.reply_token, "✅ 登録が完了しました。\n続けて下のボタンから現在地を送信し、出席を完了してください。")
-        else:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 登録中にエラーが発生しました。"))
+        # 氏名を受け取った時点では登録せず、LIFFボタンだけを送る
+        user_states[user_id]['name'] = text
+        user_states[user_id]['state'] = 'awaiting_location' # 新しい状態
+        send_liff_button(event.reply_token, "✅ 登録情報を受け付けました。\n最後に、下のボタンから現在地を送信して、初回出席を完了してください。")
 
     elif text == "出席":
         student_info = get_student_info(user_id)
@@ -142,25 +132,36 @@ def handle_text(event):
 @handler.add(MessageEvent, message=LocationMessage)
 def handle_location(event):
     user_id = event.source.user_id
-    student_info = get_student_info(user_id)
-    
-    if not student_info:
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ エラー：学生情報が見つかりません。お手数ですが、再度「出席」と送信してください。"))
-        return
-
     lat, lng = event.message.latitude, event.message.longitude
     d = distance(lat, lng, CLASS_LAT, CLASS_LNG)
-    
-    if d <= RADIUS_M:
+
+    if d > RADIUS_M:
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"❌ 教室の範囲外です（約{int(d)}m離れています）。"))
+        return
+
+    # 登録フローの途中か、通常の出席かを判断
+    if user_states.get(user_id, {}).get('state') == 'awaiting_location':
+        # 初回登録フローの最後のステップ
+        student_id = user_states[user_id]['student_id']
+        name = user_states[user_id]['name']
+        if record_event(user_id, student_id, name, "初回登録・出席"):
+            reply_text = f"✅ {name}さん（{student_id}）の初回登録と出席を完了しました。"
+        else:
+            reply_text = "❌ 登録・出席処理中にエラーが発生しました。"
+        del user_states[user_id] # 状態をリセット
+    else:
+        # 通常の出席
+        student_info = get_student_info(user_id)
+        if not student_info:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ エラー：学生情報が見つかりません。お手数ですが、再度「出席」と送信してください。"))
+            return
+        
         student_id = student_info["student_id"]
         name = student_info["name"]
-        # 種別「出席」として記録
         if record_event(user_id, student_id, name, "出席"):
             reply_text = f"✅ {name}さん（{student_id}）の出席を登録しました。"
         else:
             reply_text = "❌ 出席を受け付けましたが、台帳への記録に失敗しました。"
-    else:
-        reply_text = f"❌ 教室の範囲外です（約{int(d)}m離れています）。"
         
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
