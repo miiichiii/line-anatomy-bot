@@ -27,7 +27,7 @@ LIFF_URL = "https://liff.line.me/2007710462-pABrKoAv" # 例: "https://liff.line.
 
 # --- グローバル設定 ---
 CLASS_LAT, CLASS_LNG = 36.015, 140.110  # 教室の中心座標
-RADIUS_M = 50                           # 50m以内を「出席可能範囲」とする
+RADIUS_M = 300                           # 300m以内を「出席可能範囲」とする
 
 # --- 一時的なデータストレージ ---
 location_store = {}  # key: user_id, value: {"lat":…, "lng":…, "ts":…}
