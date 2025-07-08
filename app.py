@@ -30,8 +30,11 @@ RADIUS_M = 300
 
 # --- Google Sheets 設定 ---
 SPREADSHEET_NAME = "解剖学出席簿"
-STUDENT_LIST_SHEET_NAME = "出席記録"
-ATTENDANCE_LOG_SHEET_NAME = "出席記録"
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+# ★【要設定】記録に使うシート（タブ）の名前を、ご自身で設定した名前にしてください ★
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+SHEET_NAME = "出席簿" # 例: "シート1", "出席簿" など
+
 client = None
 try:
     creds_json_str = os.environ["GOOGLE_CREDENTIALS_JSON"]
@@ -43,7 +46,6 @@ except Exception as e:
     logging.error(f"Google Sheetsの認証情報読み込みエラー: {e}")
 
 # --- ユーザーの状態を管理する一時ストレージ ---
-# 例: user_states[user_id] = {'state': 'awaiting_name', 'student_id': 'xxxx'}
 user_states = {}
 
 # --- 関数定義 ---
@@ -56,43 +58,34 @@ def distance(lat1, lng1, lat2, lng2):
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 def get_student_info(user_id):
+    """ シートからユーザーIDを検索し、登録情報（学籍番号と氏名）を返す """
     if not client: return None
     try:
-        sheet = client.open(SPREADSHEET_NAME).worksheet(STUDENT_LIST_SHEET_NAME)
-        cell = sheet.find(user_id, in_column=2) # B列(LINE User ID)を検索
-        if cell:
-            row_values = sheet.row_values(cell.row)
-            return {"student_id": row_values[2], "name": row_values[3]} # C列:学籍番号, D列:氏名
+        sheet = client.open(SPREADSHEET_NAME).worksheet(SHEET_NAME)
+        # B列（LINE User ID）を検索し、登録記録を探す
+        all_records = sheet.get_all_records()
+        for record in reversed(all_records): # 新しい記録から探す
+            if record.get('LINE User ID') == user_id and record.get('種別') == '登録':
+                return {"student_id": record.get('学籍番号'), "name": record.get('氏名')}
         return None
     except Exception as e:
         logging.error(f"学生情報の取得エラー: {e}")
         return None
 
-def register_student(user_id, student_id, name):
+def record_event(user_id, student_id, name, event_type):
+    """ シートにイベント（登録 or 出席）を記録する """
     if not client: return False
     try:
-        sheet = client.open(SPREADSHEET_NAME).worksheet(STUDENT_LIST_SHEET_NAME)
+        sheet = client.open(SPREADSHEET_NAME).worksheet(SHEET_NAME)
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        sheet.append_row([now, user_id, student_id, name])
-        logging.info(f"学生登録成功: {name} ({student_id})")
+        sheet.append_row([now, user_id, student_id, name, event_type])
+        logging.info(f"記録成功: {name} ({student_id}) - {event_type}")
         return True
     except Exception as e:
-        logging.error(f"学生登録エラー: {e}")
-        return False
-
-def record_attendance(student_id, name):
-    if not client: return False
-    try:
-        sheet = client.open(SPREADSHEET_NAME).worksheet(ATTENDANCE_LOG_SHEET_NAME)
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        sheet.append_row([now, student_id, name, "出席"])
-        return True
-    except Exception as e:
-        logging.error(f"出席記録エラー: {e}")
+        logging.error(f"記録エラー: {e}")
         return False
 
 def send_liff_button(reply_token, text):
-    """ LIFFボタンを送信する共通関数 """
     buttons_template = ButtonsTemplate(
         title='出席登録', text=text,
         actions=[URIAction(label='現在地を送信する', uri=LIFF_URL)]
@@ -121,7 +114,6 @@ def handle_text(event):
     text = event.message.text.strip()
     current_state = user_states.get(user_id, {}).get('state')
 
-    # 登録フローの途中かどうかをチェック
     if current_state == 'awaiting_student_id':
         user_states[user_id] = {'state': 'awaiting_name', 'student_id': text}
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="次に、氏名をフルネームで送信してください。"))
@@ -129,20 +121,18 @@ def handle_text(event):
     elif current_state == 'awaiting_name':
         student_id = user_states[user_id]['student_id']
         name = text
-        if register_student(user_id, student_id, name):
-            del user_states[user_id] # 状態をリセット
+        # 種別「登録」として記録
+        if record_event(user_id, student_id, name, "登録"):
+            del user_states[user_id]
             send_liff_button(event.reply_token, "✅ 登録が完了しました。\n続けて下のボタンから現在地を送信し、出席を完了してください。")
         else:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 登録中にエラーが発生しました。"))
 
-    # 通常のコマンド処理
     elif text == "出席":
         student_info = get_student_info(user_id)
         if student_info:
-            # 登録済みユーザー
             send_liff_button(event.reply_token, "出席登録を開始します。\n下のボタンから現在地を送信してください。")
         else:
-            # 未登録ユーザー
             user_states[user_id] = {'state': 'awaiting_student_id'}
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="出席登録の前に、初回登録が必要です。\n学籍番号を送信してください。"))
     
@@ -164,7 +154,8 @@ def handle_location(event):
     if d <= RADIUS_M:
         student_id = student_info["student_id"]
         name = student_info["name"]
-        if record_attendance(student_id, name):
+        # 種別「出席」として記録
+        if record_event(user_id, student_id, name, "出席"):
             reply_text = f"✅ {name}さん（{student_id}）の出席を登録しました。"
         else:
             reply_text = "❌ 出席を受け付けましたが、台帳への記録に失敗しました。"
