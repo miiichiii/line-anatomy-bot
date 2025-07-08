@@ -22,7 +22,7 @@ handler      = WebhookHandler(LINE_CHANNEL_SECRET)
 # ★【要設定 1/1】ご自身のLIFF URLを設定してください ★
 # ★ LINE Developersコンソールで取得したLIFF URLを貼り付けます ★
 # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-LIFF_URL = "https://liff.line.me/xxxxxxxx-xxxxxxxx" # 例: "https://liff.line.me/123456-abcdefg"
+LIFF_URL = "https://liff.line.me/2007710462-pABrKoAv" # 例: "https://liff.line.me/123456-abcdefg"
 
 
 # --- グローバル設定 ---
