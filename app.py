@@ -30,7 +30,7 @@ RADIUS_M = 300
 
 # --- Google Sheets 設定 ---
 SPREADSHEET_NAME = "解剖学出席簿"
-STUDENT_LIST_SHEET_NAME = "学生名簿"
+STUDENT_LIST_SHEET_NAME = "出席記録"
 ATTENDANCE_LOG_SHEET_NAME = "出席記録"
 client = None
 try:
