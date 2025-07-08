@@ -10,7 +10,7 @@ import os, logging, json
 from datetime import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import math # mathモジュールをインポート
+import math
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -43,7 +43,8 @@ except Exception as e:
     logging.error(f"Google Sheetsの認証情報読み込みエラー: {e}")
 
 # --- ユーザーの状態を管理する一時ストレージ ---
-user_states = {} # key: user_id, value: 'awaiting_student_id'
+# 例: user_states[user_id] = {'state': 'awaiting_name', 'student_id': 'xxxx'}
+user_states = {}
 
 # --- 関数定義 ---
 def distance(lat1, lng1, lat2, lng2):
@@ -55,57 +56,48 @@ def distance(lat1, lng1, lat2, lng2):
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 def get_student_info(user_id):
-    """ 学生名簿シートからユーザーIDを検索し、学籍番号と氏名を返す """
     if not client: return None
     try:
         sheet = client.open(SPREADSHEET_NAME).worksheet(STUDENT_LIST_SHEET_NAME)
-        # B列（LINE User ID）を検索
-        cell = sheet.find(user_id, in_column=2)
+        cell = sheet.find(user_id, in_column=2) # B列(LINE User ID)を検索
         if cell:
             row_values = sheet.row_values(cell.row)
             return {"student_id": row_values[2], "name": row_values[3]} # C列:学籍番号, D列:氏名
-        return None
-    except gspread.exceptions.WorksheetNotFound:
-        logging.error(f"シート '{STUDENT_LIST_SHEET_NAME}' が見つかりません。")
         return None
     except Exception as e:
         logging.error(f"学生情報の取得エラー: {e}")
         return None
 
-def register_student(user_id, student_id):
-    """ 学生を名簿に登録する """
+def register_student(user_id, student_id, name):
     if not client: return False
     try:
-        profile = line_bot_api.get_profile(user_id)
-        user_name = profile.display_name
         sheet = client.open(SPREADSHEET_NAME).worksheet(STUDENT_LIST_SHEET_NAME)
-        
-        # 既存登録チェック
-        if sheet.find(user_id, in_column=2):
-            return "already_registered"
-
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        sheet.append_row([now, user_id, student_id, user_name])
-        logging.info(f"学生登録成功: {user_name} ({student_id})")
-        return "success"
+        sheet.append_row([now, user_id, student_id, name])
+        logging.info(f"学生登録成功: {name} ({student_id})")
+        return True
     except Exception as e:
         logging.error(f"学生登録エラー: {e}")
-        return "error"
+        return False
 
 def record_attendance(student_id, name):
-    """ 出席記録シートに出席情報を記録する """
     if not client: return False
     try:
         sheet = client.open(SPREADSHEET_NAME).worksheet(ATTENDANCE_LOG_SHEET_NAME)
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         sheet.append_row([now, student_id, name, "出席"])
         return True
-    except gspread.exceptions.WorksheetNotFound:
-        logging.error(f"シート '{ATTENDANCE_LOG_SHEET_NAME}' が見つかりません。")
-        return False
     except Exception as e:
         logging.error(f"出席記録エラー: {e}")
         return False
+
+def send_liff_button(reply_token, text):
+    """ LIFFボタンを送信する共通関数 """
+    buttons_template = ButtonsTemplate(
+        title='出席登録', text=text,
+        actions=[URIAction(label='現在地を送信する', uri=LIFF_URL)]
+    )
+    line_bot_api.reply_message(reply_token, TemplateSendMessage(alt_text='出席登録を開始します。', template=buttons_template))
 
 # --- Webhookルート ---
 @app.route("/webhook", methods=["POST"])
@@ -125,49 +117,45 @@ def health_check():
 # --- メッセージハンドラ ---
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text(event):
-    """ テキストメッセージの処理 """
     user_id = event.source.user_id
     text = event.message.text.strip()
+    current_state = user_states.get(user_id, {}).get('state')
 
-    # 登録フローの処理
-    if user_states.get(user_id) == 'awaiting_student_id':
-        student_id = text
-        result = register_student(user_id, student_id)
-        if result == "success":
-            reply_text = "✅ 登録が完了しました。\n「出席」と送信して出席登録を開始してください。"
-        elif result == "already_registered":
-            reply_text = "💡 このLINEアカウントは既に登録済みです。"
-        else:
-            reply_text = "❌ 登録中にエラーが発生しました。時間をおいて再度お試しください。"
-        del user_states[user_id] # 状態をリセット
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        return
-
-    # 通常コマンドの処理
-    if text == "出席":
-        buttons_template = ButtonsTemplate(
-            title='出席登録', text="下のボタンを押して、現在地を送信してください。",
-            actions=[URIAction(label='現在地を送信する', uri=LIFF_URL)]
-        )
-        line_bot_api.reply_message(event.reply_token, TemplateSendMessage(alt_text='出席登録を開始します。', template=buttons_template))
+    # 登録フローの途中かどうかをチェック
+    if current_state == 'awaiting_student_id':
+        user_states[user_id] = {'state': 'awaiting_name', 'student_id': text}
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="次に、氏名をフルネームで送信してください。"))
     
-    elif text == "登録":
-        user_states[user_id] = 'awaiting_student_id'
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="学籍番号を送信してください。"))
+    elif current_state == 'awaiting_name':
+        student_id = user_states[user_id]['student_id']
+        name = text
+        if register_student(user_id, student_id, name):
+            del user_states[user_id] # 状態をリセット
+            send_liff_button(event.reply_token, "✅ 登録が完了しました。\n続けて下のボタンから現在地を送信し、出席を完了してください。")
+        else:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 登録中にエラーが発生しました。"))
 
+    # 通常のコマンド処理
+    elif text == "出席":
+        student_info = get_student_info(user_id)
+        if student_info:
+            # 登録済みユーザー
+            send_liff_button(event.reply_token, "出席登録を開始します。\n下のボタンから現在地を送信してください。")
+        else:
+            # 未登録ユーザー
+            user_states[user_id] = {'state': 'awaiting_student_id'}
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="出席登録の前に、初回登録が必要です。\n学籍番号を送信してください。"))
+    
     else:
-        reply_text = "「出席」または「登録」と送信してください。"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="「出席」と送信してください。"))
 
 @handler.add(MessageEvent, message=LocationMessage)
 def handle_location(event):
-    """ 位置情報メッセージの処理 """
     user_id = event.source.user_id
-    
     student_info = get_student_info(user_id)
+    
     if not student_info:
-        reply_text = "⚠️ 学籍番号が未登録です。\n「登録」と送信して、先に学籍番号を登録してください。"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ エラー：学生情報が見つかりません。お手数ですが、再度「出席」と送信してください。"))
         return
 
     lat, lng = event.message.latitude, event.message.longitude
@@ -179,7 +167,7 @@ def handle_location(event):
         if record_attendance(student_id, name):
             reply_text = f"✅ {name}さん（{student_id}）の出席を登録しました。"
         else:
-            reply_text = "❌ 出席を受け付けましたが、台帳への記録に失敗しました。管理者に連絡してください。"
+            reply_text = "❌ 出席を受け付けましたが、台帳への記録に失敗しました。"
     else:
         reply_text = f"❌ 教室の範囲外です（約{int(d)}m離れています）。"
         
