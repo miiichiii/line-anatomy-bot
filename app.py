@@ -39,7 +39,7 @@ LIFF_URL = "https://liff.line.me/2007710462-pABrKoAv"
 
 # --- 教室の座標と判定範囲 ---
 CLASS_LAT, CLASS_LNG = 36.0266, 140.210
-RADIUS_M = 300
+RADIUS_M = 30000
 
 # --- ユーザーの状態を管理する一時ストレージ ---
 user_states = {}
