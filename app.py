@@ -7,7 +7,7 @@ from linebot.models import (
     TemplateSendMessage, ButtonsTemplate, URIAction
 )
 import os, logging, json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta # timezone, timedelta をインポート
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import math
@@ -55,19 +55,13 @@ def distance(lat1, lng1, lat2, lng2):
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 def get_student_info(user_id):
-    """ シートからユーザーIDを検索し、登録情報（学籍番号と氏名）を返す """
     if not client: return None
     try:
         sheet = client.open(SPREADSHEET_NAME).worksheet(SHEET_NAME)
         all_records = sheet.get_all_records()
-        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        # ★【修正点】必ず「初回登録・出席」の記録を探して、そこから情報を取得する ★
-        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        for record in reversed(all_records): # 新しい記録から探す方が効率的
+        for record in reversed(all_records):
             if record.get('LINE User ID') == user_id and record.get('種別') == '初回登録・出席':
                 return {"student_id": record.get('学籍番号'), "name": record.get('氏名')}
-        
-        # 初回登録の記録が見つからなければNoneを返す
         return None
     except Exception as e:
         logging.error(f"学生情報の取得エラー: {e}")
@@ -78,8 +72,18 @@ def record_event(user_id, student_id, name, event_type):
     if not client: return False
     try:
         sheet = client.open(SPREADSHEET_NAME).worksheet(SHEET_NAME)
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        sheet.append_row([now, user_id, student_id, name, event_type])
+        
+        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        # ★【修正点】タイムスタンプを日本時間（JST）に変換する処理を追加 ★
+        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        # JSTタイムゾーンを定義 (UTC+9時間)
+        jst = timezone(timedelta(hours=9))
+        # 現在のUTC時刻を取得し、JSTに変換
+        now_jst = datetime.now(timezone.utc).astimezone(jst)
+        # 指定のフォーマットで文字列に変換
+        now_str = now_jst.strftime('%Y-%m-%d %H:%M:%S')
+        
+        sheet.append_row([now_str, user_id, student_id, name, event_type])
         logging.info(f"記録成功: {name} ({student_id}) - {event_type}")
         return True
     except Exception as e:
@@ -139,7 +143,7 @@ def handle_text(event):
 def handle_location(event):
     user_id = event.source.user_id
     lat, lng = event.message.latitude, event.message.longitude
-    d = distance(lat, lng, CLASS_LAT, LNG)
+    d = distance(lat, lng, CLASS_LAT, CLASS_LNG)
 
     if d > RADIUS_M:
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"❌ 教室の範囲外です（約{int(d)}m離れています）。"))
