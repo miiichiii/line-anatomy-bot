@@ -6,11 +6,12 @@ from linebot.models import (
     LocationMessage,
     TemplateSendMessage, ButtonsTemplate, URIAction
 )
-import os, logging, json
-from datetime import datetime, timezone, timedelta # timezone, timedelta をインポート
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-import math
+import os, logging, json, math
+from datetime import datetime, timezone, timedelta
+
+# Firebase Admin SDKをインポート
+import firebase_admin
+from firebase_admin import credentials, firestore
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -21,26 +22,24 @@ LINE_CHANNEL_SECRET       = os.environ["LINE_CHANNEL_SECRET"]
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler      = WebhookHandler(LINE_CHANNEL_SECRET)
 
+# --- Firebase Admin SDKの初期化 ---
+try:
+    creds_json_str = os.environ["GOOGLE_CREDENTIALS_JSON"]
+    creds_json = json.loads(creds_json_str)
+    cred = credentials.Certificate(creds_json)
+    firebase_admin.initialize_app(cred)
+    db = firestore.client()
+    logging.info("Firestoreの初期化に成功しました。")
+except Exception as e:
+    logging.error(f"Firestoreの初期化エラー: {e}")
+    db = None
+
 # --- LIFF URL ---
 LIFF_URL = "https://liff.line.me/2007710462-pABrKoAv"
 
 # --- 教室の座標と判定範囲 ---
 CLASS_LAT, CLASS_LNG = 36.0266, 140.210
 RADIUS_M = 300
-
-# --- Google Sheets 設定 ---
-SPREADSHEET_NAME = "解剖学出席簿"
-SHEET_NAME = "出席簿"
-
-client = None
-try:
-    creds_json_str = os.environ["GOOGLE_CREDENTIALS_JSON"]
-    creds_json = json.loads(creds_json_str)
-    scope = ["https://spreadsheets.google.com/feeds", 'https://www.googleapis.com/auth/drive']
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
-    client = gspread.authorize(creds)
-except Exception as e:
-    logging.error(f"Google Sheetsの認証情報読み込みエラー: {e}")
 
 # --- ユーザーの状態を管理する一時ストレージ ---
 user_states = {}
@@ -55,39 +54,64 @@ def distance(lat1, lng1, lat2, lng2):
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 def get_student_info(user_id):
-    if not client: return None
+    """ Firestoreから学生情報を取得する """
+    if not db: return None
     try:
-        sheet = client.open(SPREADSHEET_NAME).worksheet(SHEET_NAME)
-        all_records = sheet.get_all_records()
-        for record in reversed(all_records):
-            if record.get('LINE User ID') == user_id and record.get('種別') == '初回登録・出席':
-                return {"student_id": record.get('学籍番号'), "name": record.get('氏名')}
+        doc_ref = db.collection('students').document(user_id)
+        doc = doc_ref.get()
+        if doc.exists:
+            return doc.to_dict()
         return None
     except Exception as e:
-        logging.error(f"学生情報の取得エラー: {e}")
+        logging.error(f"Firestoreからの学生情報取得エラー: {e}")
         return None
 
-def record_event(user_id, student_id, name, event_type):
-    """ シートにイベント（登録 or 出席）を記録する """
-    if not client: return False
+def record_attendance(user_id, student_info):
+    """ Firestoreに出席記録を追加する """
+    if not db: return False
     try:
-        sheet = client.open(SPREADSHEET_NAME).worksheet(SHEET_NAME)
-        
-        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        # ★【修正点】タイムスタンプを日本時間（JST）に変換する処理を追加 ★
-        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        # JSTタイムゾーンを定義 (UTC+9時間)
-        jst = timezone(timedelta(hours=9))
-        # 現在のUTC時刻を取得し、JSTに変換
-        now_jst = datetime.now(timezone.utc).astimezone(jst)
-        # 指定のフォーマットで文字列に変換
-        now_str = now_jst.strftime('%Y-%m-%d %H:%M:%S')
-        
-        sheet.append_row([now_str, user_id, student_id, name, event_type])
-        logging.info(f"記録成功: {name} ({student_id}) - {event_type}")
+        # 新しいドキュメントを自動IDで作成
+        doc_ref = db.collection('attendance_logs').document()
+        doc_ref.set({
+            'user_id': user_id,
+            'student_id': student_info.get('student_id'),
+            'name': student_info.get('name'),
+            'timestamp': firestore.SERVER_TIMESTAMP # サーバー側の正確な時刻
+        })
         return True
     except Exception as e:
-        logging.error(f"記録エラー: {e}")
+        logging.error(f"Firestoreへの出席記録エラー: {e}")
+        return False
+
+def register_and_attend(user_id, student_id, name):
+    """ Firestoreに学生を登録し、同時に出席も記録する """
+    if not db: return False
+    try:
+        # バッチ処理で登録と出席を同時に（アトミックに）実行
+        batch = db.batch()
+
+        # 学生登録
+        student_ref = db.collection('students').document(user_id)
+        batch.set(student_ref, {
+            'student_id': student_id,
+            'name': name,
+            'registered_at': firestore.SERVER_TIMESTAMP
+        })
+
+        # 出席記録
+        log_ref = db.collection('attendance_logs').document()
+        batch.set(log_ref, {
+            'user_id': user_id,
+            'student_id': student_id,
+            'name': name,
+            'timestamp': firestore.SERVER_TIMESTAMP,
+            'is_first_time': True # 初回であることがわかるフラグ
+        })
+
+        batch.commit()
+        return True
+    except Exception as e:
+        logging.error(f"Firestoreへの初回登録・出席エラー: {e}")
         return False
 
 def send_liff_button(reply_token, text):
@@ -152,7 +176,7 @@ def handle_location(event):
     if user_states.get(user_id, {}).get('state') == 'awaiting_location':
         student_id = user_states[user_id]['student_id']
         name = user_states[user_id]['name']
-        if record_event(user_id, student_id, name, "初回登録・出席"):
+        if register_and_attend(user_id, student_id, name):
             reply_text = f"✅ {name}さん（{student_id}）の初回登録と出席を完了しました。"
         else:
             reply_text = "❌ 登録・出席処理中にエラーが発生しました。"
@@ -163,10 +187,8 @@ def handle_location(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ エラー：学生情報が見つかりません。お手数ですが、再度「出席」と送信してください。"))
             return
         
-        student_id = student_info["student_id"]
-        name = student_info["name"]
-        if record_event(user_id, student_id, name, "出席"):
-            reply_text = f"✅ {name}さん（{student_id}）の出席を登録しました。"
+        if record_attendance(user_id, student_info):
+            reply_text = f"✅ {student_info.get('name')}さん（{student_info.get('student_id')}）の出席を登録しました。"
         else:
             reply_text = "❌ 出席を受け付けましたが、台帳への記録に失敗しました。"
         
