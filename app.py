@@ -1,4 +1,4 @@
-from flask import Flask, request, abort
+from flask import Flask, request, abort, render_template, jsonify
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
@@ -9,7 +9,6 @@ from linebot.models import (
 import os, logging, json, math
 from datetime import datetime, timezone, timedelta
 
-# Firebase Admin SDKをインポート
 import firebase_admin
 from firebase_admin import credentials, firestore
 
@@ -19,6 +18,8 @@ logging.basicConfig(level=logging.INFO)
 # --- 環境変数とAPIクライアントの設定 ---
 LINE_CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 LINE_CHANNEL_SECRET       = os.environ["LINE_CHANNEL_SECRET"]
+EXPORT_SECRET_KEY         = os.environ.get("EXPORT_SECRET_KEY", "default_secret_key")
+
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler      = WebhookHandler(LINE_CHANNEL_SECRET)
 
@@ -29,7 +30,6 @@ try:
     cred = credentials.Certificate(creds_json)
     firebase_admin.initialize_app(cred)
     db = firestore.client()
-    logging.info("Firestoreの初期化に成功しました。")
 except Exception as e:
     logging.error(f"Firestoreの初期化エラー: {e}")
     db = None
@@ -41,10 +41,10 @@ LIFF_URL = "https://liff.line.me/2007710462-pABrKoAv"
 CLASS_LAT, CLASS_LNG = 36.0266, 140.210
 RADIUS_M = 300
 
-# --- ユーザーの状態を管理する一時ストレージ ---
+# --- ユーザーの状態を管理 ---
 user_states = {}
 
-# --- 関数定義 ---
+# --- 関数定義 (省略... 変更なし) ---
 def distance(lat1, lng1, lat2, lng2):
     R = 6371000
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
@@ -54,7 +54,6 @@ def distance(lat1, lng1, lat2, lng2):
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 def get_student_info(user_id):
-    """ Firestoreから学生情報を取得する """
     if not db: return None
     try:
         doc_ref = db.collection('students').document(user_id)
@@ -67,16 +66,14 @@ def get_student_info(user_id):
         return None
 
 def record_attendance(user_id, student_info):
-    """ Firestoreに出席記録を追加する """
     if not db: return False
     try:
-        # 新しいドキュメントを自動IDで作成
         doc_ref = db.collection('attendance_logs').document()
         doc_ref.set({
             'user_id': user_id,
             'student_id': student_info.get('student_id'),
             'name': student_info.get('name'),
-            'timestamp': firestore.SERVER_TIMESTAMP # サーバー側の正確な時刻
+            'timestamp': firestore.SERVER_TIMESTAMP
         })
         return True
     except Exception as e:
@@ -84,30 +81,23 @@ def record_attendance(user_id, student_info):
         return False
 
 def register_and_attend(user_id, student_id, name):
-    """ Firestoreに学生を登録し、同時に出席も記録する """
     if not db: return False
     try:
-        # バッチ処理で登録と出席を同時に（アトミックに）実行
         batch = db.batch()
-
-        # 学生登録
         student_ref = db.collection('students').document(user_id)
         batch.set(student_ref, {
             'student_id': student_id,
             'name': name,
             'registered_at': firestore.SERVER_TIMESTAMP
         })
-
-        # 出席記録
         log_ref = db.collection('attendance_logs').document()
         batch.set(log_ref, {
             'user_id': user_id,
             'student_id': student_id,
             'name': name,
             'timestamp': firestore.SERVER_TIMESTAMP,
-            'is_first_time': True # 初回であることがわかるフラグ
+            'is_first_time': True
         })
-
         batch.commit()
         return True
     except Exception as e:
@@ -136,7 +126,73 @@ def webhook():
 def health_check():
     return "OK", 200
 
-# --- メッセージハンドラ ---
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+# ★【新規追加】ビューアページを表示するためのルート ★
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+@app.route("/viewer")
+def viewer():
+    return render_template('viewer.html')
+
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+# ★【新規追加】日付ごとの出席データをFirestoreから取得するためのAPIルート ★
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+@app.route("/get_attendance")
+def get_attendance():
+    secret_key = request.args.get('key')
+    if secret_key != EXPORT_SECRET_KEY:
+        return jsonify({"error": "アクセス権がありません。"}), 403
+
+    date_str = request.args.get('date')
+    if not date_str:
+        return jsonify({"error": "日付が指定されていません。"}), 400
+
+    if not db:
+        return jsonify({"error": "データベース接続エラー"}), 500
+
+    try:
+        # JSTタイムゾーンを定義
+        jst = timezone(timedelta(hours=9))
+        
+        # 指定された日付の開始時刻 (JST)
+        start_dt_jst = datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=jst)
+        
+        # 指定された日付の終了時刻 (JST)
+        end_dt_jst = start_dt_jst + timedelta(days=1)
+
+        # FirestoreはUTCでクエリをかけるため、UTCに変換
+        start_dt_utc = start_dt_jst.astimezone(timezone.utc)
+        end_dt_utc = end_dt_jst.astimezone(timezone.utc)
+
+        # Firestoreからデータをクエリ
+        logs_ref = db.collection('attendance_logs')
+        query = logs_ref.where('timestamp', '>=', start_dt_utc).where('timestamp', '<', end_dt_utc).order_by('timestamp')
+        
+        docs = query.stream()
+        
+        results = []
+        for doc in docs:
+            log = doc.to_dict()
+            ts = log.get('timestamp')
+            if ts:
+                # 表示用にJSTの文字列に変換
+                timestamp_str = ts.astimezone(jst).strftime('%H:%M:%S')
+            else:
+                timestamp_str = "N/A"
+
+            results.append({
+                "timestamp": timestamp_str,
+                "student_id": log.get('student_id', 'N/A'),
+                "name": log.get('name', 'N/A'),
+                "is_first_time": log.get('is_first_time', False)
+            })
+            
+        return jsonify(results)
+
+    except Exception as e:
+        logging.error(f"出席データ取得エラー: {e}")
+        return jsonify({"error": f"データ取得中にエラーが発生しました: {e}"}), 500
+
+# --- メッセージハンドラ (省略... 変更なし) ---
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text(event):
     user_id = event.source.user_id
