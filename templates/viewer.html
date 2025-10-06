@@ -40,7 +40,7 @@
                     </tr>
                 </thead>
                 <tbody id="results-body" class="bg-white divide-y divide-gray-200">
-                    <!-- Data will be inserted here -->
+                    <!-- Data will be inserted here by JavaScript -->
                 </tbody>
             </table>
         </div>
@@ -82,7 +82,8 @@
                     throw new Error('アクセス権がありません。秘密鍵を確認してください。');
                 }
                 if (!response.ok) {
-                    throw new Error(`サーバーエラー: ${response.statusText}`);
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `サーバーエラー: ${response.statusText}`);
                 }
 
                 const data = await response.json();
@@ -97,7 +98,7 @@
                     data.forEach(log => {
                         const row = document.createElement('tr');
                         
-                        const note = log.is_first_time ? '初回' : '';
+                        const note = log.is_first_time ? '初回登録' : '';
 
                         row.innerHTML = `
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${log.timestamp}</td>
