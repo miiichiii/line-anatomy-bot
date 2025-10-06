@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出席状況ビューアver.1.2</title>
+    <title>出席状況ビューア</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 min-h-screen flex flex-col items-center p-4 sm:p-8 font-sans">
     <div class="w-full max-w-4xl bg-white rounded-lg shadow-md p-6">
-        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 mb-6 border-b pb-4">出席状況ビューアver.1.2</h1>
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 mb-6 border-b pb-4">出席状況ビューア</h1>
 
         <!-- Controls -->
-        <div class="flex flex-col sm:flex-row sm:items-end gap-4 mb-6">
+        <div class="flex flex-col sm:flex-row sm:items-end gap-4 mb-4">
             <div class="flex-1">
                 <label for="date-picker" class="block text-sm font-medium text-gray-700 mb-1">日付を選択</label>
                 <input type="date" id="date-picker" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
@@ -25,8 +25,38 @@
             </button>
         </div>
 
+        <!-- Column Copy Toolbar -->
+        <div class="flex flex-col gap-3 mb-3">
+            <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                <div class="flex items-center gap-2">
+                    <label for="delimiter" class="text-sm text-gray-700">区切り</label>
+                    <select id="delimiter" class="p-2 border border-gray-300 rounded-md text-sm">
+                        <option value="newline">改行</option>
+                        <option value="comma">カンマ</option>
+                        <option value="tab">タブ</option>
+                    </select>
+                </div>
+                <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" id="include-header" class="rounded border-gray-300">
+                    ヘッダー（列名）を含める
+                </label>
+                <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" id="dedupe" class="rounded border-gray-300">
+                    重複を除外
+                </label>
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="copy-ids" class="bg-gray-800 text-white text-sm font-semibold py-2 px-4 rounded-md hover:bg-gray-900">
+                    学籍番号 列をコピー
+                </button>
+                <button id="copy-names" class="bg-gray-800 text-white text-sm font-semibold py-2 px-4 rounded-md hover:bg-gray-900">
+                    氏名 列をコピー
+                </button>
+            </div>
+        </div>
+
         <!-- Status Message -->
-        <div id="status" class="text-center my-4"></div>
+        <div id="status" class="text-center my-2"></div>
 
         <!-- Results Table -->
         <div class="overflow-x-auto">
@@ -34,10 +64,10 @@
             <table class="min-w-full divide-y divide-gray-200 select-none">
                 <thead class="bg-gray-50">
                     <tr>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">出席日時</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">学籍番号</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">氏名</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">備考</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">出席日時</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">学籍番号</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">氏名</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">備考</th>
                     </tr>
                 </thead>
                 <tbody id="results-body" class="bg-white divide-y divide-gray-200">
@@ -61,8 +91,18 @@
         const fetchButton = document.getElementById('fetch-button');
         const resultsBody = document.getElementById('results-body');
         const statusDiv = document.getElementById('status');
+
+        const delimiterSel = document.getElementById('delimiter');
+        const includeHeaderChk = document.getElementById('include-header');
+        const dedupeChk = document.getElementById('dedupe');
+
+        const copyIdsBtn = document.getElementById('copy-ids');
+        const copyNamesBtn = document.getElementById('copy-names');
+
         const toast = document.getElementById('toast');
         const toastText = document.getElementById('toast-text');
+
+        let currentData = []; // 画面に表示しているデータのスナップショット
 
         // default date: today
         const today = new Date();
@@ -71,7 +111,7 @@
         const dd = String(today.getDate()).padStart(2, '0');
         datePicker.value = `${yyyy}-${mm}-${dd}`;
 
-        // helpers
+        // --- helpers ---
         function showToast(message) {
             toastText.textContent = message;
             toast.classList.remove('hidden');
@@ -85,7 +125,6 @@
                     await navigator.clipboard.writeText(text);
                     return true;
                 } else {
-                    // フォールバック（HTTP等）
                     const ta = document.createElement('textarea');
                     ta.value = text;
                     ta.style.position = 'fixed';
@@ -102,33 +141,52 @@
             }
         }
 
-        function createCopyButton(label, getTextFn, aria) {
-            // ボタン（アイコン+SRラベル）
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'ml-2 inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1';
-            btn.setAttribute('aria-label', aria);
-            btn.title = label;
-
-            // SVGアイコン（コピー）
-            btn.innerHTML = `
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke-width="1.5"></rect>
-                    <path d="M5 15V5a2 2 0 0 1 2-2h10" stroke-width="1.5"></path>
-                </svg>
-                <span class="sr-only">${label}</span>
-            `;
-
-            btn.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                const text = getTextFn();
-                const ok = await copyToClipboard(text);
-                showToast(ok ? `「${text}」をコピーしました` : 'コピーに失敗しました');
-            });
-
-            return btn;
+        function getDelimiter() {
+            const v = delimiterSel.value;
+            if (v === 'tab') return '\t';
+            if (v === 'comma') return ',';
+            return '\n';
         }
 
+        function buildTextForColumn(key, headerLabel) {
+            // データ抽出（空白行を除く）
+            let lines = currentData
+                .map(r => (r?.[key] ?? '').toString().trim())
+                .filter(s => s.length > 0);
+
+            // 重複除外（順序維持）
+            if (dedupeChk.checked) {
+                const seen = new Set();
+                lines = lines.filter(v => (seen.has(v) ? false : (seen.add(v), true)));
+            }
+
+            // 結合
+            const sep = getDelimiter();
+            // ヘッダー（列名）を先頭に追加（重複除外の対象にはしない）
+            if (includeHeaderChk.checked) {
+                return [headerLabel, ...lines].join(sep);
+            }
+            return lines.join(sep);
+        }
+
+        async function copyColumn(key) {
+            if (!Array.isArray(currentData) || currentData.length === 0) {
+                showToast('コピー対象のデータがありません');
+                return;
+            }
+            const label = key === 'student_id' ? '学籍番号' : '氏名';
+            const text = buildTextForColumn(key, label);
+            const ok = await copyToClipboard(text);
+
+            // 件数表示（ヘッダーは件数に含めない）
+            const count = (text === '' ? 0 : text.split(getDelimiter()).length) - (includeHeaderChk.checked ? 1 : 0);
+            showToast(ok ? `${label} ${count}件をコピーしました` : 'コピーに失敗しました');
+        }
+
+        copyIdsBtn.addEventListener('click', () => copyColumn('student_id'));
+        copyNamesBtn.addEventListener('click', () => copyColumn('name'));
+
+        // --- build table rows ---
         function buildRow(log) {
             const tr = document.createElement('tr');
 
@@ -138,32 +196,22 @@
             tdTime.textContent = log.timestamp ?? '';
             tr.appendChild(tdTime);
 
-            // 学籍番号（選択可 + コピー）
+            // 学籍番号（選択可）
             const tdId = document.createElement('td');
             tdId.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-900';
-            const idWrap = document.createElement('div');
-            idWrap.className = 'flex items-center';
             const idSpan = document.createElement('span');
             idSpan.className = 'select-text';
             idSpan.textContent = log.student_id ?? '';
-            const idBtn = createCopyButton('学籍番号をコピー', () => idSpan.textContent, '学籍番号をコピー');
-            idWrap.appendChild(idSpan);
-            idWrap.appendChild(idBtn);
-            tdId.appendChild(idWrap);
+            tdId.appendChild(idSpan);
             tr.appendChild(tdId);
 
-            // 氏名（選択可 + コピー）
+            // 氏名（選択可）
             const tdName = document.createElement('td');
             tdName.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-900';
-            const nameWrap = document.createElement('div');
-            nameWrap.className = 'flex items-center';
             const nameSpan = document.createElement('span');
             nameSpan.className = 'select-text';
             nameSpan.textContent = log.name ?? '';
-            const nameBtn = createCopyButton('氏名をコピー', () => nameSpan.textContent, '氏名をコピー');
-            nameWrap.appendChild(nameSpan);
-            nameWrap.appendChild(nameBtn);
-            tdName.appendChild(nameWrap);
+            tdName.appendChild(nameSpan);
             tr.appendChild(tdName);
 
             // 備考
@@ -175,6 +223,7 @@
             return tr;
         }
 
+        // --- fetch handler ---
         fetchButton.addEventListener('click', async () => {
             const selectedDate = datePicker.value;
             const secretKey = secretKeyInput.value;
@@ -188,10 +237,11 @@
             statusDiv.textContent = 'データを取得中...';
             statusDiv.className = 'text-blue-600';
             resultsBody.innerHTML = '';
+            currentData = [];
 
             try {
                 const response = await fetch(`/get_attendance?date=${encodeURIComponent(selectedDate)}&key=${encodeURIComponent(secretKey)}`);
-                
+
                 if (response.status === 403) {
                     throw new Error('アクセス権がありません。秘密鍵を確認してください。');
                 }
@@ -212,10 +262,11 @@
                     return;
                 }
 
+                currentData = data; // 列コピーのため保持
+
                 statusDiv.textContent = `${selectedDate} の出席者は ${data.length} 名です。`;
                 statusDiv.className = 'text-green-600';
 
-                // 行を追加
                 for (const log of data) {
                     resultsBody.appendChild(buildRow(log));
                 }
