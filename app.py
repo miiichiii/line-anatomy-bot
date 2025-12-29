@@ -111,6 +111,51 @@ def send_liff_button(reply_token, text):
     )
     line_bot_api.reply_message(reply_token, TemplateSendMessage(alt_text='出席登録を開始します。', template=buttons_template))
 
+def fetch_attendance_logs(date_str):
+    if not db:
+        raise RuntimeError("データベース接続エラー")
+
+    # JSTタイムゾーンを定義
+    jst = timezone(timedelta(hours=9))
+
+    # 指定された日付の開始時刻 (JST)
+    start_dt_jst = datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=jst)
+
+    # 指定された日付の終了時刻 (JST)
+    end_dt_jst = start_dt_jst + timedelta(days=1)
+
+    # FirestoreはUTCでクエリをかけるため、UTCに変換
+    start_dt_utc = start_dt_jst.astimezone(timezone.utc)
+    end_dt_utc = end_dt_jst.astimezone(timezone.utc)
+
+    # Firestoreからデータをクエリ
+    logs_ref = db.collection('attendance_logs')
+    query = logs_ref.where('timestamp', '>=', start_dt_utc).where('timestamp', '<', end_dt_utc).order_by('timestamp')
+
+    docs = query.stream()
+
+    results = []
+    for doc in docs:
+        log = doc.to_dict()
+        ts = log.get('timestamp')
+        if ts:
+            # 表示用にJSTの文字列に変換
+            timestamp_str = ts.astimezone(jst).strftime('%H:%M:%S')
+        else:
+            timestamp_str = "N/A"
+
+        results.append({
+            "log_id": doc.id,
+            "timestamp": timestamp_str,
+            "student_id": log.get('student_id', 'N/A'),
+            "name": log.get('name', 'N/A'),
+            "is_first_time": log.get('is_first_time', False),
+            "user_id": log.get('user_id'),
+            "course": log.get('course')
+        })
+
+    return results
+
 # --- Webhookルート ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -146,51 +191,100 @@ def get_attendance():
     if not date_str:
         return jsonify({"error": "日付が指定されていません。"}), 400
 
-    if not db:
-        return jsonify({"error": "データベース接続エラー"}), 500
-
     try:
-        # JSTタイムゾーンを定義
-        jst = timezone(timedelta(hours=9))
-        
-        # 指定された日付の開始時刻 (JST)
-        start_dt_jst = datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=jst)
-        
-        # 指定された日付の終了時刻 (JST)
-        end_dt_jst = start_dt_jst + timedelta(days=1)
-
-        # FirestoreはUTCでクエリをかけるため、UTCに変換
-        start_dt_utc = start_dt_jst.astimezone(timezone.utc)
-        end_dt_utc = end_dt_jst.astimezone(timezone.utc)
-
-        # Firestoreからデータをクエリ
-        logs_ref = db.collection('attendance_logs')
-        query = logs_ref.where('timestamp', '>=', start_dt_utc).where('timestamp', '<', end_dt_utc).order_by('timestamp')
-        
-        docs = query.stream()
-        
-        results = []
-        for doc in docs:
-            log = doc.to_dict()
-            ts = log.get('timestamp')
-            if ts:
-                # 表示用にJSTの文字列に変換
-                timestamp_str = ts.astimezone(jst).strftime('%H:%M:%S')
-            else:
-                timestamp_str = "N/A"
-
-            results.append({
-                "timestamp": timestamp_str,
-                "student_id": log.get('student_id', 'N/A'),
-                "name": log.get('name', 'N/A'),
-                "is_first_time": log.get('is_first_time', False)
-            })
-            
-        return jsonify(results)
+        results = fetch_attendance_logs(date_str)
+        sanitized = [
+            {k: v for k, v in log.items() if k != "user_id"}
+            for log in results
+        ]
+        return jsonify(sanitized)
 
     except Exception as e:
         logging.error(f"出席データ取得エラー: {e}")
         return jsonify({"error": f"データ取得中にエラーが発生しました: {e}"}), 500
+
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+# ★【新規追加】日付ごとの出席者にメッセージを送信するAPIルート ★
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+@app.route("/send_message", methods=["POST"])
+def send_message():
+    data = request.get_json(silent=True) or {}
+    secret_key = data.get('key')
+    if secret_key != EXPORT_SECRET_KEY:
+        return jsonify({"error": "アクセス権がありません。"}), 403
+
+    date_str = data.get('date')
+    course = (data.get('course') or '').strip().upper()
+    message = (data.get('message') or '').strip()
+    if not date_str:
+        return jsonify({"error": "日付が指定されていません。"}), 400
+    if not message:
+        return jsonify({"error": "メッセージが空です。"}), 400
+    if course and course not in {"PT", "OT", "NS"}:
+        return jsonify({"error": "コース指定が不正です。"}), 400
+
+    try:
+        logs = fetch_attendance_logs(date_str)
+        if course:
+            logs = [log for log in logs if (log.get('course') or '').upper() == course]
+        user_ids = [log.get('user_id') for log in logs if log.get('user_id')]
+
+        # 重複を除外（順序維持）
+        seen = set()
+        targets = []
+        for uid in user_ids:
+            if uid in seen:
+                continue
+            seen.add(uid)
+            targets.append(uid)
+
+        if not targets:
+            return jsonify({"sent": 0, "target": 0, "failed": 0})
+
+        failed = 0
+        for uid in targets:
+            try:
+                line_bot_api.push_message(uid, TextSendMessage(text=message))
+            except Exception as e:
+                logging.error(f"メッセージ送信エラー: {uid} {e}")
+                failed += 1
+
+        return jsonify({"sent": len(targets) - failed, "target": len(targets), "failed": failed})
+
+    except Exception as e:
+        logging.error(f"メッセージ送信APIエラー: {e}")
+        return jsonify({"error": f"送信中にエラーが発生しました: {e}"}), 500
+
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+# ★【新規追加】出席ログのコース(PT/OT/NS)を更新するAPIルート ★
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+@app.route("/set_course", methods=["POST"])
+def set_course():
+    data = request.get_json(silent=True) or {}
+    secret_key = data.get('key')
+    if secret_key != EXPORT_SECRET_KEY:
+        return jsonify({"error": "アクセス権がありません。"}), 403
+
+    log_id = (data.get('log_id') or '').strip()
+    course = (data.get('course') or '').strip().upper()
+    if not log_id:
+        return jsonify({"error": "log_idが指定されていません。"}), 400
+    if course not in {"PT", "OT", "NS", ""}:
+        return jsonify({"error": "コース指定が不正です。"}), 400
+
+    if not db:
+        return jsonify({"error": "データベース接続エラー"}), 500
+
+    try:
+        doc_ref = db.collection('attendance_logs').document(log_id)
+        if course == "":
+            doc_ref.update({"course": firestore.DELETE_FIELD})
+        else:
+            doc_ref.update({"course": course})
+        return jsonify({"ok": True, "course": course})
+    except Exception as e:
+        logging.error(f"コース更新エラー: {e}")
+        return jsonify({"error": f"更新中にエラーが発生しました: {e}"}), 500
 
 # --- メッセージハンドラ (省略... 変更なし) ---
 @handler.add(MessageEvent, message=TextMessage)

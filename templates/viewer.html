@@ -55,6 +55,29 @@
             </div>
         </div>
 
+        <!-- Message Sender -->
+        <div class="mt-4 p-4 border border-gray-200 rounded-lg bg-gray-50">
+            <h2 class="text-base font-semibold text-gray-800 mb-2">出席者に一斉メッセージ</h2>
+            <p class="text-xs text-gray-600 mb-2">選択中の日付の出席者にのみ送信されます。</p>
+            <textarea id="message-text" rows="3" placeholder="送信するメッセージを入力"
+                class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-3">
+                <div class="flex items-center gap-2">
+                    <label for="course-filter" class="text-sm text-gray-700">送信対象</label>
+                    <select id="course-filter" class="p-2 border border-gray-300 rounded-md text-sm">
+                        <option value="">全員</option>
+                        <option value="PT">PT</option>
+                        <option value="OT">OT</option>
+                        <option value="NS">NS</option>
+                    </select>
+                </div>
+                <button id="send-message" class="w-full sm:w-auto bg-emerald-600 text-white font-bold py-2 px-6 rounded-md hover:bg-emerald-700 transition duration-150 ease-in-out">
+                    メッセージ送信
+                </button>
+                <div id="send-status" class="text-sm text-gray-600"></div>
+            </div>
+        </div>
+
         <!-- Status Message -->
         <div id="status" class="text-center my-2"></div>
 
@@ -67,6 +90,7 @@
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">出席日時</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">学籍番号</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">氏名</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">コース</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">備考</th>
                     </tr>
                 </thead>
@@ -98,6 +122,11 @@
 
         const copyIdsBtn = document.getElementById('copy-ids');
         const copyNamesBtn = document.getElementById('copy-names');
+
+        const messageText = document.getElementById('message-text');
+        const sendMessageBtn = document.getElementById('send-message');
+        const sendStatus = document.getElementById('send-status');
+        const courseFilter = document.getElementById('course-filter');
 
         const toast = document.getElementById('toast');
         const toastText = document.getElementById('toast-text');
@@ -214,6 +243,59 @@
             tdName.appendChild(nameSpan);
             tr.appendChild(tdName);
 
+            // コース
+            const tdCourse = document.createElement('td');
+            tdCourse.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-900';
+            const courseSel = document.createElement('select');
+            courseSel.className = 'p-1 border border-gray-300 rounded-md text-sm bg-white';
+            const courseOptions = [
+                { value: '', label: '未設定' },
+                { value: 'PT', label: 'PT' },
+                { value: 'OT', label: 'OT' },
+                { value: 'NS', label: 'NS' }
+            ];
+            for (const opt of courseOptions) {
+                const o = document.createElement('option');
+                o.value = opt.value;
+                o.textContent = opt.label;
+                courseSel.appendChild(o);
+            }
+            courseSel.value = (log.course || '').toUpperCase();
+            courseSel.addEventListener('change', async () => {
+                const selected = courseSel.value;
+                const secretKey = secretKeyInput.value;
+                if (!secretKey) {
+                    showToast('秘密鍵を入力してください');
+                    courseSel.value = (log.course || '').toUpperCase();
+                    return;
+                }
+                try {
+                    const response = await fetch('/set_course', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            key: secretKey,
+                            log_id: log.log_id,
+                            course: selected
+                        })
+                    });
+                    if (response.status === 403) {
+                        throw new Error('秘密鍵が正しくありません');
+                    }
+                    const data = await response.json();
+                    if (!response.ok) {
+                        throw new Error(data.error || '更新に失敗しました');
+                    }
+                    log.course = selected || null;
+                    showToast('コースを更新しました');
+                } catch (error) {
+                    courseSel.value = (log.course || '').toUpperCase();
+                    showToast(`エラー: ${error.message}`);
+                }
+            });
+            tdCourse.appendChild(courseSel);
+            tr.appendChild(tdCourse);
+
             // 備考
             const tdNote = document.createElement('td');
             tdNote.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-500';
@@ -274,6 +356,65 @@
             } catch (error) {
                 statusDiv.textContent = `エラー: ${error.message}`;
                 statusDiv.className = 'text-red-600';
+            }
+        });
+
+        // --- send message handler ---
+        sendMessageBtn.addEventListener('click', async () => {
+            const selectedDate = datePicker.value;
+            const secretKey = secretKeyInput.value;
+            const message = messageText.value.trim();
+            const course = (courseFilter.value || '').trim();
+
+            if (!selectedDate || !secretKey) {
+                sendStatus.textContent = '日付と秘密鍵を入力してください。';
+                sendStatus.className = 'text-sm text-red-600';
+                return;
+            }
+            if (!message) {
+                sendStatus.textContent = 'メッセージを入力してください。';
+                sendStatus.className = 'text-sm text-red-600';
+                return;
+            }
+            const courseLabel = course ? `${course}のみ` : '全員';
+            if (!window.confirm(`${selectedDate} の出席者（${courseLabel}）に送信します。よろしいですか？`)) {
+                return;
+            }
+
+            sendStatus.textContent = '送信中...';
+            sendStatus.className = 'text-sm text-blue-600';
+
+            try {
+                const response = await fetch('/send_message', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        date: selectedDate,
+                        key: secretKey,
+                        message: message,
+                        course: course
+                    })
+                });
+
+                if (response.status === 403) {
+                    throw new Error('アクセス権がありません。秘密鍵を確認してください。');
+                }
+
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || '送信に失敗しました。');
+                }
+
+                if (data.failed && data.failed > 0) {
+                    sendStatus.textContent = `送信完了: ${data.sent}/${data.target}件（失敗 ${data.failed}件）`;
+                    sendStatus.className = 'text-sm text-amber-600';
+                } else {
+                    sendStatus.textContent = `送信完了: ${data.sent}/${data.target}件`;
+                    sendStatus.className = 'text-sm text-green-600';
+                }
+            } catch (error) {
+                sendStatus.textContent = `エラー: ${error.message}`;
+                sendStatus.className = 'text-sm text-red-600';
             }
         });
     });
