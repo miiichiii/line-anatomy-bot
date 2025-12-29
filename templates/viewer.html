@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出席状況ビューア</title>
+    <title>出席状況ビューア1.02</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 min-h-screen flex flex-col items-center p-4 sm:p-8 font-sans">
     <div class="w-full max-w-4xl bg-white rounded-lg shadow-md p-6">
-        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 mb-6 border-b pb-4">出席状況ビューア</h1>
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 mb-6 border-b pb-4">出席状況ビューア1.02</h1>
 
         <!-- Controls -->
         <div class="flex flex-col sm:flex-row sm:items-end gap-4 mb-4">
@@ -105,6 +105,10 @@
                         <option value="NS">NS</option>
                     </select>
                 </div>
+                <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" id="send-selected-only" class="rounded border-gray-300">
+                    選択した学生のみ
+                </label>
                 <button id="send-message" class="w-full sm:w-auto bg-emerald-600 text-white font-bold py-2 px-6 rounded-md hover:bg-emerald-700 transition duration-150 ease-in-out">
                     メッセージ送信
                 </button>
@@ -169,6 +173,7 @@
         const sendMessageBtn = document.getElementById('send-message');
         const sendStatus = document.getElementById('send-status');
         const courseFilter = document.getElementById('course-filter');
+        const sendSelectedOnly = document.getElementById('send-selected-only');
 
         const toast = document.getElementById('toast');
         const toastText = document.getElementById('toast-text');
@@ -524,6 +529,8 @@
             const secretKey = secretKeyInput.value;
             const message = messageText.value.trim();
             const course = (courseFilter.value || '').trim();
+            const selectedBoxes = Array.from(resultsBody.querySelectorAll('input.row-select')).filter(b => b.checked);
+            const selectedLogIds = selectedBoxes.map(b => b.dataset.logId);
 
             if (!selectedDate || !secretKey) {
                 sendStatus.textContent = '日付と秘密鍵を入力してください。';
@@ -535,8 +542,14 @@
                 sendStatus.className = 'text-sm text-red-600';
                 return;
             }
+            if (sendSelectedOnly.checked && selectedLogIds.length === 0) {
+                sendStatus.textContent = '選択した学生がいません。';
+                sendStatus.className = 'text-sm text-red-600';
+                return;
+            }
             const courseLabel = course ? `${course}のみ` : '全員';
-            if (!window.confirm(`${selectedDate} の出席者（${courseLabel}）に送信します。よろしいですか？`)) {
+            const targetLabel = sendSelectedOnly.checked ? `選択 ${selectedLogIds.length}件` : courseLabel;
+            if (!window.confirm(`${selectedDate} の出席者（${targetLabel}）に送信します。よろしいですか？`)) {
                 return;
             }
 
@@ -551,7 +564,8 @@
                         date: selectedDate,
                         key: secretKey,
                         message: message,
-                        course: course
+                        course: course,
+                        log_ids: sendSelectedOnly.checked ? selectedLogIds : []
                     })
                 });
 

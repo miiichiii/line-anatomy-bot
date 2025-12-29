@@ -235,6 +235,7 @@ def send_message():
 
     date_str = data.get('date')
     course = (data.get('course') or '').strip().upper()
+    log_ids = data.get('log_ids') or []
     message = (data.get('message') or '').strip()
     if not date_str:
         return jsonify({"error": "日付が指定されていません。"}), 400
@@ -242,10 +243,15 @@ def send_message():
         return jsonify({"error": "メッセージが空です。"}), 400
     if course and course not in {"PT", "OT", "NS"}:
         return jsonify({"error": "コース指定が不正です。"}), 400
+    if log_ids and not isinstance(log_ids, list):
+        return jsonify({"error": "log_ids指定が不正です。"}), 400
 
     try:
         logs = fetch_attendance_logs(date_str)
-        if course:
+        if log_ids:
+            target_ids = set([str(x) for x in log_ids])
+            logs = [log for log in logs if log.get('log_id') in target_ids]
+        elif course:
             logs = [log for log in logs if (log.get('course') or '').upper() == course]
         user_ids = [log.get('user_id') for log in logs if log.get('user_id')]
 
