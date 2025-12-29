@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出席状況ビューア1.03</title>
+    <title>出席状況ビューア1.04</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 min-h-screen flex flex-col items-center p-4 sm:p-8 font-sans">
     <div class="w-full max-w-4xl bg-white rounded-lg shadow-md p-6">
-        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 mb-6 border-b pb-4">出席状況ビューア1.03</h1>
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 mb-6 border-b pb-4">出席状況ビューア1.04</h1>
 
         <!-- Controls -->
         <div class="flex flex-col sm:flex-row sm:items-end gap-4 mb-4">
@@ -87,6 +87,41 @@
                 </select>
             </div>
             <div id="bulk-status" class="text-sm text-gray-600"></div>
+        </div>
+
+        <!-- Course Roster -->
+        <div class="mt-4 p-4 border border-gray-200 rounded-lg bg-gray-50">
+            <h2 class="text-base font-semibold text-gray-800 mb-2">コース別 学生一覧</h2>
+            <p class="text-xs text-gray-600 mb-2">出席日付とは関係なく、登録済み学生の一覧を表示します。</p>
+            <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                <div class="flex items-center gap-2">
+                    <label for="roster-course" class="text-sm text-gray-700">コース</label>
+                    <select id="roster-course" class="p-2 border border-gray-300 rounded-md text-sm bg-white">
+                        <option value="">選択してください</option>
+                        <option value="PT">PT</option>
+                        <option value="OT">OT</option>
+                        <option value="NS">NS</option>
+                    </select>
+                </div>
+                <button id="roster-fetch" class="w-full sm:w-auto bg-gray-800 text-white text-sm font-semibold py-2 px-4 rounded-md hover:bg-gray-900">
+                    表示
+                </button>
+                <div id="roster-status" class="text-sm text-gray-600"></div>
+            </div>
+            <div class="overflow-x-auto mt-3">
+                <table class="min-w-full divide-y divide-gray-200 select-none">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">学籍番号</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">氏名</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">コース</th>
+                        </tr>
+                    </thead>
+                    <tbody id="roster-body" class="bg-white divide-y divide-gray-200">
+                        <!-- JSで挿入 -->
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <!-- Message Sender -->
@@ -168,6 +203,11 @@
         const selectAllChk = document.getElementById('select-all');
         const bulkStatus = document.getElementById('bulk-status');
         const courseViewFilter = document.getElementById('course-view-filter');
+
+        const rosterCourse = document.getElementById('roster-course');
+        const rosterFetchBtn = document.getElementById('roster-fetch');
+        const rosterStatus = document.getElementById('roster-status');
+        const rosterBody = document.getElementById('roster-body');
 
         const messageText = document.getElementById('message-text');
         const sendMessageBtn = document.getElementById('send-message');
@@ -453,6 +493,77 @@
         }
 
         courseViewFilter.addEventListener('change', applyCourseFilter);
+
+        // --- course roster ---
+        function buildRosterRow(student) {
+            const tr = document.createElement('tr');
+
+            const tdId = document.createElement('td');
+            tdId.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-900';
+            tdId.textContent = student.student_id ?? '';
+            tr.appendChild(tdId);
+
+            const tdName = document.createElement('td');
+            tdName.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-900';
+            tdName.textContent = student.name ?? '';
+            tr.appendChild(tdName);
+
+            const tdCourse = document.createElement('td');
+            tdCourse.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-500';
+            tdCourse.textContent = student.course ?? '';
+            tr.appendChild(tdCourse);
+
+            return tr;
+        }
+
+        async function fetchRoster() {
+            const secretKey = secretKeyInput.value;
+            const course = (rosterCourse.value || '').trim();
+
+            if (!secretKey) {
+                rosterStatus.textContent = '秘密鍵を入力してください。';
+                rosterStatus.className = 'text-sm text-red-600';
+                return;
+            }
+            if (!course) {
+                rosterStatus.textContent = 'コースを選択してください。';
+                rosterStatus.className = 'text-sm text-red-600';
+                return;
+            }
+
+            rosterStatus.textContent = '取得中...';
+            rosterStatus.className = 'text-sm text-blue-600';
+            rosterBody.innerHTML = '';
+
+            try {
+                const response = await fetch(`/students_by_course?course=${encodeURIComponent(course)}&key=${encodeURIComponent(secretKey)}`);
+                if (response.status === 403) {
+                    throw new Error('アクセス権がありません。秘密鍵を確認してください。');
+                }
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || '取得に失敗しました。');
+                }
+
+                if (!Array.isArray(data) || data.length === 0) {
+                    rosterStatus.textContent = `${course} の学生は見つかりません。`;
+                    rosterStatus.className = 'text-sm text-gray-600';
+                    return;
+                }
+
+                rosterStatus.textContent = `${course} の学生は ${data.length} 名です。`;
+                rosterStatus.className = 'text-sm text-green-600';
+                for (const student of data) {
+                    rosterBody.appendChild(buildRosterRow(student));
+                }
+            } catch (error) {
+                rosterStatus.textContent = `エラー: ${error.message}`;
+                rosterStatus.className = 'text-sm text-red-600';
+            }
+        }
+
+        rosterFetchBtn.addEventListener('click', fetchRoster);
+        rosterCourse.addEventListener('change', fetchRoster);
 
         // --- bulk course update ---
         bulkApplyBtn.addEventListener('click', async () => {

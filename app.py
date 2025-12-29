@@ -327,6 +327,38 @@ def set_course():
         logging.error(f"コース更新エラー: {e}")
         return jsonify({"error": f"更新中にエラーが発生しました: {e}"}), 500
 
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+# ★【新規追加】コース別の学生一覧を取得するAPIルート ★
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+@app.route("/students_by_course")
+def students_by_course():
+    secret_key = request.args.get('key')
+    if secret_key != EXPORT_SECRET_KEY:
+        return jsonify({"error": "アクセス権がありません。"}), 403
+
+    course = (request.args.get('course') or '').strip().upper()
+    if course not in {"PT", "OT", "NS"}:
+        return jsonify({"error": "コース指定が不正です。"}), 400
+
+    if not db:
+        return jsonify({"error": "データベース接続エラー"}), 500
+
+    try:
+        docs = db.collection('students').where('course', '==', course).stream()
+        results = []
+        for doc in docs:
+            data = doc.to_dict() or {}
+            results.append({
+                "student_id": data.get('student_id', 'N/A'),
+                "name": data.get('name', 'N/A'),
+                "course": data.get('course', course)
+            })
+        results.sort(key=lambda r: r.get('student_id', ''))
+        return jsonify(results)
+    except Exception as e:
+        logging.error(f"学生一覧取得エラー: {e}")
+        return jsonify({"error": f"取得中にエラーが発生しました: {e}"}), 500
+
 # --- メッセージハンドラ (省略... 変更なし) ---
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text(event):
