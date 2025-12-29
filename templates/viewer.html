@@ -3,188 +3,193 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出席状況ビューア1.05</title>
+    <title>出席状況ビューア1.06</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 min-h-screen flex flex-col items-center p-4 sm:p-8 font-sans">
     <div class="w-full max-w-4xl bg-white rounded-lg shadow-md p-6">
-        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 mb-6 border-b pb-4">出席状況ビューア1.05</h1>
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 mb-6 border-b pb-4">出席状況ビューア1.06</h1>
 
-        <!-- Controls -->
-        <div class="flex flex-col sm:flex-row sm:items-end gap-4 mb-4">
-            <div class="flex-1">
-                <label for="date-picker" class="block text-sm font-medium text-gray-700 mb-1">日付を選択</label>
-                <input type="date" id="date-picker" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
-            </div>
-            <div class="flex-1">
-                <label for="secret-key" class="block text-sm font-medium text-gray-700 mb-1">秘密鍵</label>
-                <input type="password" id="secret-key" placeholder="秘密のキーを入力" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
-            </div>
-            <button id="fetch-button" class="w-full sm:w-auto bg-indigo-600 text-white font-bold py-2 px-6 rounded-md hover:bg-indigo-700 transition duration-150 ease-in-out">
-                出席者を表示
-            </button>
-        </div>
-
-        <!-- Column Copy Toolbar -->
-        <div class="flex flex-col gap-3 mb-3">
-            <div class="flex flex-col sm:flex-row sm:items-center gap-3">
-                <div class="flex items-center gap-2">
-                    <label for="delimiter" class="text-sm text-gray-700">区切り</label>
-                    <select id="delimiter" class="p-2 border border-gray-300 rounded-md text-sm">
-                        <option value="newline">改行</option>
-                        <option value="comma">カンマ</option>
-                        <option value="tab">タブ</option>
-                    </select>
+        <div class="space-y-6">
+            <!-- 連絡用カード -->
+            <section class="p-4 border border-gray-200 rounded-lg bg-gray-50">
+                <h2 class="text-base font-semibold text-gray-800 mb-2">連絡用カード</h2>
+                <p class="text-xs text-gray-600 mb-3">出席日付とは関係なく、コース別の学生に連絡できます。</p>
+                <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div class="flex items-center gap-2">
+                        <label for="roster-course" class="text-sm text-gray-700">コース</label>
+                        <select id="roster-course" class="p-2 border border-gray-300 rounded-md text-sm bg-white">
+                            <option value="">選択してください</option>
+                            <option value="PT">PT</option>
+                            <option value="OT">OT</option>
+                            <option value="NS">NS</option>
+                        </select>
+                    </div>
+                    <button id="roster-fetch" class="w-full sm:w-auto bg-gray-800 text-white text-sm font-semibold py-2 px-4 rounded-md hover:bg-gray-900">
+                        表示
+                    </button>
+                    <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                        <input type="checkbox" id="roster-select-all" class="rounded border-gray-300">
+                        全選択
+                    </label>
+                    <div id="roster-status" class="text-sm text-gray-600"></div>
                 </div>
-                <label class="inline-flex items-center gap-2 text-sm text-gray-700">
-                    <input type="checkbox" id="include-header" class="rounded border-gray-300">
-                    ヘッダー（列名）を含める
-                </label>
-                <label class="inline-flex items-center gap-2 text-sm text-gray-700">
-                    <input type="checkbox" id="dedupe" class="rounded border-gray-300">
-                    重複を除外
-                </label>
-            </div>
-            <div class="flex items-center gap-2">
-                <button id="copy-ids" class="bg-gray-800 text-white text-sm font-semibold py-2 px-4 rounded-md hover:bg-gray-900">
-                    学籍番号 列をコピー
-                </button>
-                <button id="copy-names" class="bg-gray-800 text-white text-sm font-semibold py-2 px-4 rounded-md hover:bg-gray-900">
-                    氏名 列をコピー
-                </button>
-            </div>
-        </div>
-
-        <!-- Bulk Course Update -->
-        <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-3 p-3 border border-gray-200 rounded-lg bg-gray-50">
-            <div class="flex items-center gap-2">
-                <label for="bulk-course" class="text-sm text-gray-700">一括コース変更</label>
-                <select id="bulk-course" class="p-2 border border-gray-300 rounded-md text-sm bg-white">
-                    <option value="">未設定</option>
-                    <option value="PT">PT</option>
-                    <option value="OT">OT</option>
-                    <option value="NS">NS</option>
-                </select>
-            </div>
-            <button id="bulk-apply" class="w-full sm:w-auto bg-slate-700 text-white text-sm font-semibold py-2 px-4 rounded-md hover:bg-slate-800">
-                選択した学生に適用
-            </button>
-            <button id="bulk-clear" class="w-full sm:w-auto bg-slate-200 text-slate-800 text-sm font-semibold py-2 px-4 rounded-md hover:bg-slate-300">
-                選択解除
-            </button>
-            <label class="inline-flex items-center gap-2 text-sm text-gray-700">
-                <input type="checkbox" id="select-all" class="rounded border-gray-300">
-                全選択
-            </label>
-            <div class="flex items-center gap-2">
-                <label for="course-view-filter" class="text-sm text-gray-700">フィルタ</label>
-                <select id="course-view-filter" class="p-2 border border-gray-300 rounded-md text-sm bg-white">
-                    <option value="">全員</option>
-                    <option value="PT">PT</option>
-                    <option value="OT">OT</option>
-                    <option value="NS">NS</option>
-                    <option value="UNSET">未設定</option>
-                </select>
-            </div>
-            <div id="bulk-status" class="text-sm text-gray-600"></div>
-        </div>
-
-        <!-- Course Roster -->
-        <div class="mt-4 p-4 border border-gray-200 rounded-lg bg-gray-50">
-            <h2 class="text-base font-semibold text-gray-800 mb-2">コース別 学生一覧</h2>
-            <p class="text-xs text-gray-600 mb-2">出席日付とは関係なく、登録済み学生の一覧を表示します。</p>
-            <div class="flex flex-col sm:flex-row sm:items-center gap-3">
-                <div class="flex items-center gap-2">
-                    <label for="roster-course" class="text-sm text-gray-700">コース</label>
-                    <select id="roster-course" class="p-2 border border-gray-300 rounded-md text-sm bg-white">
-                        <option value="">選択してください</option>
-                        <option value="PT">PT</option>
-                        <option value="OT">OT</option>
-                        <option value="NS">NS</option>
-                    </select>
+                <div class="flex flex-col sm:flex-row sm:items-center gap-3 mt-3">
+                    <textarea id="roster-message" rows="2" placeholder="このコースの選択学生に送信するメッセージ"
+                        class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                    <button id="roster-send" class="w-full sm:w-auto bg-emerald-600 text-white text-sm font-semibold py-2 px-4 rounded-md hover:bg-emerald-700">
+                        選択学生に送信
+                    </button>
+                    <div id="roster-send-status" class="text-sm text-gray-600"></div>
                 </div>
-                <button id="roster-fetch" class="w-full sm:w-auto bg-gray-800 text-white text-sm font-semibold py-2 px-4 rounded-md hover:bg-gray-900">
-                    表示
-                </button>
-                <label class="inline-flex items-center gap-2 text-sm text-gray-700">
-                    <input type="checkbox" id="roster-select-all" class="rounded border-gray-300">
-                    全選択
-                </label>
-                <div id="roster-status" class="text-sm text-gray-600"></div>
-            </div>
-            <div class="flex flex-col sm:flex-row sm:items-center gap-3 mt-3">
-                <textarea id="roster-message" rows="2" placeholder="このコースの選択学生に送信するメッセージ"
+                <div class="overflow-x-auto mt-3">
+                    <table class="min-w-full divide-y divide-gray-200 select-none">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">選択</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">学籍番号</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">氏名</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">コース</th>
+                            </tr>
+                        </thead>
+                        <tbody id="roster-body" class="bg-white divide-y divide-gray-200">
+                            <!-- JSで挿入 -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- 出席者管理カード -->
+            <section class="p-4 border border-gray-200 rounded-lg bg-gray-50">
+                <h2 class="text-base font-semibold text-gray-800 mb-2">出席者管理カード</h2>
+                <div class="flex flex-col sm:flex-row sm:items-end gap-4 mb-4">
+                    <div class="flex-1">
+                        <label for="date-picker" class="block text-sm font-medium text-gray-700 mb-1">日付を選択</label>
+                        <input type="date" id="date-picker" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                    <div class="flex-1">
+                        <label for="secret-key" class="block text-sm font-medium text-gray-700 mb-1">秘密鍵</label>
+                        <input type="password" id="secret-key" placeholder="秘密のキーを入力" class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                    <button id="fetch-button" class="w-full sm:w-auto bg-indigo-600 text-white font-bold py-2 px-6 rounded-md hover:bg-indigo-700 transition duration-150 ease-in-out">
+                        出席者を表示
+                    </button>
+                </div>
+
+                <!-- Column Copy Toolbar -->
+                <div class="flex flex-col gap-3 mb-3">
+                    <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                        <div class="flex items-center gap-2">
+                            <label for="delimiter" class="text-sm text-gray-700">区切り</label>
+                            <select id="delimiter" class="p-2 border border-gray-300 rounded-md text-sm">
+                                <option value="newline">改行</option>
+                                <option value="comma">カンマ</option>
+                                <option value="tab">タブ</option>
+                            </select>
+                        </div>
+                        <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                            <input type="checkbox" id="include-header" class="rounded border-gray-300">
+                            ヘッダー（列名）を含める
+                        </label>
+                        <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                            <input type="checkbox" id="dedupe" class="rounded border-gray-300">
+                            重複を除外
+                        </label>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button id="copy-ids" class="bg-gray-800 text-white text-sm font-semibold py-2 px-4 rounded-md hover:bg-gray-900">
+                            学籍番号 列をコピー
+                        </button>
+                        <button id="copy-names" class="bg-gray-800 text-white text-sm font-semibold py-2 px-4 rounded-md hover:bg-gray-900">
+                            氏名 列をコピー
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Bulk Course Update -->
+                <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-3 p-3 border border-gray-200 rounded-lg bg-white">
+                    <div class="flex items-center gap-2">
+                        <label for="bulk-course" class="text-sm text-gray-700">一括コース変更</label>
+                        <select id="bulk-course" class="p-2 border border-gray-300 rounded-md text-sm bg-white">
+                            <option value="">未設定</option>
+                            <option value="PT">PT</option>
+                            <option value="OT">OT</option>
+                            <option value="NS">NS</option>
+                        </select>
+                    </div>
+                    <button id="bulk-apply" class="w-full sm:w-auto bg-slate-700 text-white text-sm font-semibold py-2 px-4 rounded-md hover:bg-slate-800">
+                        選択した学生に適用
+                    </button>
+                    <button id="bulk-clear" class="w-full sm:w-auto bg-slate-200 text-slate-800 text-sm font-semibold py-2 px-4 rounded-md hover:bg-slate-300">
+                        選択解除
+                    </button>
+                    <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                        <input type="checkbox" id="select-all" class="rounded border-gray-300">
+                        全選択
+                    </label>
+                    <div class="flex items-center gap-2">
+                        <label for="course-view-filter" class="text-sm text-gray-700">フィルタ</label>
+                        <select id="course-view-filter" class="p-2 border border-gray-300 rounded-md text-sm bg-white">
+                            <option value="">全員</option>
+                            <option value="PT">PT</option>
+                            <option value="OT">OT</option>
+                            <option value="NS">NS</option>
+                            <option value="UNSET">未設定</option>
+                        </select>
+                    </div>
+                    <div id="bulk-status" class="text-sm text-gray-600"></div>
+                </div>
+
+                <!-- Status Message -->
+                <div id="status" class="text-center my-2"></div>
+
+                <!-- Results Table -->
+                <div class="overflow-x-auto">
+                    <!-- テーブル全体は選択不可 -->
+                    <table class="min-w-full divide-y divide-gray-200 select-none">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">選択</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">出席日時</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">学籍番号</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">氏名</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">コース</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">備考</th>
+                            </tr>
+                        </thead>
+                        <tbody id="results-body" class="bg-white divide-y divide-gray-200">
+                            <!-- JSで挿入 -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- メッセージカード -->
+            <section class="p-4 border border-gray-200 rounded-lg bg-gray-50">
+                <h2 class="text-base font-semibold text-gray-800 mb-2">メッセージカード</h2>
+                <p class="text-xs text-gray-600 mb-2">選択中の日付の出席者にのみ送信されます。</p>
+                <textarea id="message-text" rows="3" placeholder="送信するメッセージを入力"
                     class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"></textarea>
-                <button id="roster-send" class="w-full sm:w-auto bg-emerald-600 text-white text-sm font-semibold py-2 px-4 rounded-md hover:bg-emerald-700">
-                    選択学生に送信
-                </button>
-                <div id="roster-send-status" class="text-sm text-gray-600"></div>
-            </div>
-            <div class="overflow-x-auto mt-3">
-                <table class="min-w-full divide-y divide-gray-200 select-none">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">選択</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">学籍番号</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">氏名</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">コース</th>
-                        </tr>
-                    </thead>
-                    <tbody id="roster-body" class="bg-white divide-y divide-gray-200">
-                        <!-- JSで挿入 -->
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- Message Sender -->
-        <div class="mt-4 p-4 border border-gray-200 rounded-lg bg-gray-50">
-            <h2 class="text-base font-semibold text-gray-800 mb-2">出席者に一斉メッセージ</h2>
-            <p class="text-xs text-gray-600 mb-2">選択中の日付の出席者にのみ送信されます。</p>
-            <textarea id="message-text" rows="3" placeholder="送信するメッセージを入力"
-                class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"></textarea>
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-3">
-                <div class="flex items-center gap-2">
-                    <label for="course-filter" class="text-sm text-gray-700">送信対象</label>
-                    <select id="course-filter" class="p-2 border border-gray-300 rounded-md text-sm">
-                        <option value="">全員</option>
-                        <option value="PT">PT</option>
-                        <option value="OT">OT</option>
-                        <option value="NS">NS</option>
-                    </select>
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-3">
+                    <div class="flex items-center gap-2">
+                        <label for="course-filter" class="text-sm text-gray-700">送信対象</label>
+                        <select id="course-filter" class="p-2 border border-gray-300 rounded-md text-sm">
+                            <option value="">全員</option>
+                            <option value="PT">PT</option>
+                            <option value="OT">OT</option>
+                            <option value="NS">NS</option>
+                        </select>
+                    </div>
+                    <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                        <input type="checkbox" id="send-selected-only" class="rounded border-gray-300">
+                        選択した学生のみ
+                    </label>
+                    <button id="send-message" class="w-full sm:w-auto bg-emerald-600 text-white font-bold py-2 px-6 rounded-md hover:bg-emerald-700 transition duration-150 ease-in-out">
+                        メッセージ送信
+                    </button>
+                    <div id="send-status" class="text-sm text-gray-600"></div>
                 </div>
-                <label class="inline-flex items-center gap-2 text-sm text-gray-700">
-                    <input type="checkbox" id="send-selected-only" class="rounded border-gray-300">
-                    選択した学生のみ
-                </label>
-                <button id="send-message" class="w-full sm:w-auto bg-emerald-600 text-white font-bold py-2 px-6 rounded-md hover:bg-emerald-700 transition duration-150 ease-in-out">
-                    メッセージ送信
-                </button>
-                <div id="send-status" class="text-sm text-gray-600"></div>
-            </div>
-        </div>
-
-        <!-- Status Message -->
-        <div id="status" class="text-center my-2"></div>
-
-        <!-- Results Table -->
-        <div class="overflow-x-auto">
-            <!-- テーブル全体は選択不可 -->
-            <table class="min-w-full divide-y divide-gray-200 select-none">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">選択</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">出席日時</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">学籍番号</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">氏名</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">コース</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">備考</th>
-                    </tr>
-                </thead>
-                <tbody id="results-body" class="bg-white divide-y divide-gray-200">
-                    <!-- JSで挿入 -->
-                </tbody>
-            </table>
+            </section>
         </div>
     </div>
 
