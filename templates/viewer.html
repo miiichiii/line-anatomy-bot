@@ -55,6 +55,40 @@
             </div>
         </div>
 
+        <!-- Bulk Course Update -->
+        <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-3 p-3 border border-gray-200 rounded-lg bg-gray-50">
+            <div class="flex items-center gap-2">
+                <label for="bulk-course" class="text-sm text-gray-700">一括コース変更</label>
+                <select id="bulk-course" class="p-2 border border-gray-300 rounded-md text-sm bg-white">
+                    <option value="">未設定</option>
+                    <option value="PT">PT</option>
+                    <option value="OT">OT</option>
+                    <option value="NS">NS</option>
+                </select>
+            </div>
+            <button id="bulk-apply" class="w-full sm:w-auto bg-slate-700 text-white text-sm font-semibold py-2 px-4 rounded-md hover:bg-slate-800">
+                選択した学生に適用
+            </button>
+            <button id="bulk-clear" class="w-full sm:w-auto bg-slate-200 text-slate-800 text-sm font-semibold py-2 px-4 rounded-md hover:bg-slate-300">
+                選択解除
+            </button>
+            <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" id="select-all" class="rounded border-gray-300">
+                全選択
+            </label>
+            <div class="flex items-center gap-2">
+                <label for="course-view-filter" class="text-sm text-gray-700">フィルタ</label>
+                <select id="course-view-filter" class="p-2 border border-gray-300 rounded-md text-sm bg-white">
+                    <option value="">全員</option>
+                    <option value="PT">PT</option>
+                    <option value="OT">OT</option>
+                    <option value="NS">NS</option>
+                    <option value="UNSET">未設定</option>
+                </select>
+            </div>
+            <div id="bulk-status" class="text-sm text-gray-600"></div>
+        </div>
+
         <!-- Message Sender -->
         <div class="mt-4 p-4 border border-gray-200 rounded-lg bg-gray-50">
             <h2 class="text-base font-semibold text-gray-800 mb-2">出席者に一斉メッセージ</h2>
@@ -87,6 +121,7 @@
             <table class="min-w-full divide-y divide-gray-200 select-none">
                 <thead class="bg-gray-50">
                     <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">選択</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">出席日時</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">学籍番号</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">氏名</th>
@@ -122,6 +157,13 @@
 
         const copyIdsBtn = document.getElementById('copy-ids');
         const copyNamesBtn = document.getElementById('copy-names');
+
+        const bulkCourse = document.getElementById('bulk-course');
+        const bulkApplyBtn = document.getElementById('bulk-apply');
+        const bulkClearBtn = document.getElementById('bulk-clear');
+        const selectAllChk = document.getElementById('select-all');
+        const bulkStatus = document.getElementById('bulk-status');
+        const courseViewFilter = document.getElementById('course-view-filter');
 
         const messageText = document.getElementById('message-text');
         const sendMessageBtn = document.getElementById('send-message');
@@ -218,6 +260,17 @@
         // --- build table rows ---
         function buildRow(log) {
             const tr = document.createElement('tr');
+            tr.dataset.course = (log.course || '').toUpperCase();
+
+            // 選択
+            const tdSelect = document.createElement('td');
+            tdSelect.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-900';
+            const chk = document.createElement('input');
+            chk.type = 'checkbox';
+            chk.className = 'row-select rounded border-gray-300';
+            chk.dataset.logId = log.log_id;
+            tdSelect.appendChild(chk);
+            tr.appendChild(tdSelect);
 
             // 出席日時
             const tdTime = document.createElement('td');
@@ -287,6 +340,7 @@
                         throw new Error(data.error || '更新に失敗しました');
                     }
                     log.course = selected || null;
+                    tr.dataset.course = selected || '';
                     showToast('コースを更新しました');
                 } catch (error) {
                     courseSel.value = (log.course || '').toUpperCase();
@@ -353,9 +407,114 @@
                     resultsBody.appendChild(buildRow(log));
                 }
 
+                selectAllChk.checked = false;
+                bulkClearBtn.disabled = false;
+                courseViewFilter.value = '';
+                applyCourseFilter();
+                bulkStatus.textContent = '';
             } catch (error) {
                 statusDiv.textContent = `エラー: ${error.message}`;
                 statusDiv.className = 'text-red-600';
+            }
+        });
+
+        // --- bulk selection ---
+        selectAllChk.addEventListener('change', () => {
+            const checked = selectAllChk.checked;
+            const boxes = resultsBody.querySelectorAll('tr:not(.hidden) input.row-select');
+            boxes.forEach(b => { b.checked = checked; });
+        });
+
+        bulkClearBtn.addEventListener('click', () => {
+            const boxes = resultsBody.querySelectorAll('input.row-select');
+            boxes.forEach(b => { b.checked = false; });
+            selectAllChk.checked = false;
+        });
+
+        function applyCourseFilter() {
+            const filter = courseViewFilter.value;
+            const rows = resultsBody.querySelectorAll('tr');
+            rows.forEach(row => {
+                const rowCourse = (row.dataset.course || '').toUpperCase();
+                let show = true;
+                if (filter === 'UNSET') {
+                    show = rowCourse === '';
+                } else if (filter) {
+                    show = rowCourse === filter;
+                }
+                row.classList.toggle('hidden', !show);
+            });
+            selectAllChk.checked = false;
+        }
+
+        courseViewFilter.addEventListener('change', applyCourseFilter);
+
+        // --- bulk course update ---
+        bulkApplyBtn.addEventListener('click', async () => {
+            const selected = bulkCourse.value;
+            const secretKey = secretKeyInput.value;
+            const boxes = Array.from(resultsBody.querySelectorAll('tr:not(.hidden) input.row-select')).filter(b => b.checked);
+
+            if (!secretKey) {
+                bulkStatus.textContent = '秘密鍵を入力してください。';
+                bulkStatus.className = 'text-sm text-red-600';
+                return;
+            }
+            if (boxes.length === 0) {
+                bulkStatus.textContent = '対象の学生を選択してください。';
+                bulkStatus.className = 'text-sm text-red-600';
+                return;
+            }
+            if (!window.confirm(`${boxes.length}件のコースを「${selected || '未設定'}」に変更します。よろしいですか？`)) {
+                return;
+            }
+
+            bulkStatus.textContent = '更新中...';
+            bulkStatus.className = 'text-sm text-blue-600';
+
+            let failed = 0;
+            for (const box of boxes) {
+                const logId = box.dataset.logId;
+                try {
+                    const response = await fetch('/set_course', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            key: secretKey,
+                            log_id: logId,
+                            course: selected
+                        })
+                    });
+                    if (response.status === 403) {
+                        throw new Error('秘密鍵が正しくありません');
+                    }
+                    const data = await response.json();
+                    if (!response.ok) {
+                        throw new Error(data.error || '更新に失敗しました');
+                    }
+
+                    // UIのセレクトも更新
+                    const row = box.closest('tr');
+                    if (row) {
+                        const sel = row.querySelector('select');
+                        if (sel) sel.value = selected;
+                        row.dataset.course = selected || '';
+                    }
+
+                    const log = currentData.find(r => r.log_id === logId);
+                    if (log) log.course = selected || null;
+                } catch (error) {
+                    failed += 1;
+                }
+            }
+
+            const ok = boxes.length - failed;
+            if (failed > 0) {
+                bulkStatus.textContent = `更新完了: ${ok}/${boxes.length}件（失敗 ${failed}件）`;
+                bulkStatus.className = 'text-sm text-amber-600';
+            } else {
+                bulkStatus.textContent = `更新完了: ${ok}/${boxes.length}件`;
+                bulkStatus.className = 'text-sm text-green-600';
             }
         });
 
