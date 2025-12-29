@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出席状況ビューア1.04</title>
+    <title>出席状況ビューア1.05</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 min-h-screen flex flex-col items-center p-4 sm:p-8 font-sans">
     <div class="w-full max-w-4xl bg-white rounded-lg shadow-md p-6">
-        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 mb-6 border-b pb-4">出席状況ビューア1.04</h1>
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 mb-6 border-b pb-4">出席状況ビューア1.05</h1>
 
         <!-- Controls -->
         <div class="flex flex-col sm:flex-row sm:items-end gap-4 mb-4">
@@ -106,12 +106,25 @@
                 <button id="roster-fetch" class="w-full sm:w-auto bg-gray-800 text-white text-sm font-semibold py-2 px-4 rounded-md hover:bg-gray-900">
                     表示
                 </button>
+                <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" id="roster-select-all" class="rounded border-gray-300">
+                    全選択
+                </label>
                 <div id="roster-status" class="text-sm text-gray-600"></div>
+            </div>
+            <div class="flex flex-col sm:flex-row sm:items-center gap-3 mt-3">
+                <textarea id="roster-message" rows="2" placeholder="このコースの選択学生に送信するメッセージ"
+                    class="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                <button id="roster-send" class="w-full sm:w-auto bg-emerald-600 text-white text-sm font-semibold py-2 px-4 rounded-md hover:bg-emerald-700">
+                    選択学生に送信
+                </button>
+                <div id="roster-send-status" class="text-sm text-gray-600"></div>
             </div>
             <div class="overflow-x-auto mt-3">
                 <table class="min-w-full divide-y divide-gray-200 select-none">
                     <thead class="bg-gray-50">
                         <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">選択</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">学籍番号</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">氏名</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">コース</th>
@@ -208,6 +221,10 @@
         const rosterFetchBtn = document.getElementById('roster-fetch');
         const rosterStatus = document.getElementById('roster-status');
         const rosterBody = document.getElementById('roster-body');
+        const rosterSelectAll = document.getElementById('roster-select-all');
+        const rosterMessage = document.getElementById('roster-message');
+        const rosterSendBtn = document.getElementById('roster-send');
+        const rosterSendStatus = document.getElementById('roster-send-status');
 
         const messageText = document.getElementById('message-text');
         const sendMessageBtn = document.getElementById('send-message');
@@ -497,6 +514,16 @@
         // --- course roster ---
         function buildRosterRow(student) {
             const tr = document.createElement('tr');
+            tr.dataset.userId = student.user_id;
+
+            const tdSelect = document.createElement('td');
+            tdSelect.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-900';
+            const chk = document.createElement('input');
+            chk.type = 'checkbox';
+            chk.className = 'roster-select rounded border-gray-300';
+            chk.dataset.userId = student.user_id;
+            tdSelect.appendChild(chk);
+            tr.appendChild(tdSelect);
 
             const tdId = document.createElement('td');
             tdId.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-900';
@@ -534,6 +561,7 @@
             rosterStatus.textContent = '取得中...';
             rosterStatus.className = 'text-sm text-blue-600';
             rosterBody.innerHTML = '';
+            rosterSelectAll.checked = false;
 
             try {
                 const response = await fetch(`/students_by_course?course=${encodeURIComponent(course)}&key=${encodeURIComponent(secretKey)}`);
@@ -564,6 +592,70 @@
 
         rosterFetchBtn.addEventListener('click', fetchRoster);
         rosterCourse.addEventListener('change', fetchRoster);
+
+        rosterSelectAll.addEventListener('change', () => {
+            const checked = rosterSelectAll.checked;
+            const boxes = rosterBody.querySelectorAll('input.roster-select');
+            boxes.forEach(b => { b.checked = checked; });
+        });
+
+        rosterSendBtn.addEventListener('click', async () => {
+            const secretKey = secretKeyInput.value;
+            const message = rosterMessage.value.trim();
+            const boxes = Array.from(rosterBody.querySelectorAll('input.roster-select')).filter(b => b.checked);
+            const userIds = boxes.map(b => b.dataset.userId);
+
+            if (!secretKey) {
+                rosterSendStatus.textContent = '秘密鍵を入力してください。';
+                rosterSendStatus.className = 'text-sm text-red-600';
+                return;
+            }
+            if (!message) {
+                rosterSendStatus.textContent = 'メッセージを入力してください。';
+                rosterSendStatus.className = 'text-sm text-red-600';
+                return;
+            }
+            if (userIds.length === 0) {
+                rosterSendStatus.textContent = '送信対象を選択してください。';
+                rosterSendStatus.className = 'text-sm text-red-600';
+                return;
+            }
+            if (!window.confirm(`選択した ${userIds.length} 名に送信します。よろしいですか？`)) {
+                return;
+            }
+
+            rosterSendStatus.textContent = '送信中...';
+            rosterSendStatus.className = 'text-sm text-blue-600';
+
+            try {
+                const response = await fetch('/send_message_students', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        key: secretKey,
+                        message: message,
+                        user_ids: userIds
+                    })
+                });
+                if (response.status === 403) {
+                    throw new Error('アクセス権がありません。秘密鍵を確認してください。');
+                }
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || '送信に失敗しました。');
+                }
+                if (data.failed && data.failed > 0) {
+                    rosterSendStatus.textContent = `送信完了: ${data.sent}/${data.target}件（失敗 ${data.failed}件）`;
+                    rosterSendStatus.className = 'text-sm text-amber-600';
+                } else {
+                    rosterSendStatus.textContent = `送信完了: ${data.sent}/${data.target}件`;
+                    rosterSendStatus.className = 'text-sm text-green-600';
+                }
+            } catch (error) {
+                rosterSendStatus.textContent = `エラー: ${error.message}`;
+                rosterSendStatus.className = 'text-sm text-red-600';
+            }
+        });
 
         // --- bulk course update ---
         bulkApplyBtn.addEventListener('click', async () => {

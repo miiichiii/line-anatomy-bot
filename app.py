@@ -349,6 +349,7 @@ def students_by_course():
         for doc in docs:
             data = doc.to_dict() or {}
             results.append({
+                "user_id": doc.id,
                 "student_id": data.get('student_id', 'N/A'),
                 "name": data.get('name', 'N/A'),
                 "course": data.get('course', course)
@@ -358,6 +359,42 @@ def students_by_course():
     except Exception as e:
         logging.error(f"学生一覧取得エラー: {e}")
         return jsonify({"error": f"取得中にエラーが発生しました: {e}"}), 500
+
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+# ★【新規追加】学生一覧から選択した学生へメッセージ送信するAPIルート ★
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+@app.route("/send_message_students", methods=["POST"])
+def send_message_students():
+    data = request.get_json(silent=True) or {}
+    secret_key = data.get('key')
+    if secret_key != EXPORT_SECRET_KEY:
+        return jsonify({"error": "アクセス権がありません。"}), 403
+
+    message = (data.get('message') or '').strip()
+    user_ids = data.get('user_ids') or []
+    if not message:
+        return jsonify({"error": "メッセージが空です。"}), 400
+    if not isinstance(user_ids, list) or not user_ids:
+        return jsonify({"error": "送信対象が指定されていません。"}), 400
+
+    # 重複除外（順序維持）
+    seen = set()
+    targets = []
+    for uid in user_ids:
+        if not uid or uid in seen:
+            continue
+        seen.add(uid)
+        targets.append(uid)
+
+    failed = 0
+    for uid in targets:
+        try:
+            line_bot_api.push_message(uid, TextSendMessage(text=message))
+        except Exception as e:
+            logging.error(f"メッセージ送信エラー: {uid} {e}")
+            failed += 1
+
+    return jsonify({"sent": len(targets) - failed, "target": len(targets), "failed": failed})
 
 # --- メッセージハンドラ (省略... 変更なし) ---
 @handler.add(MessageEvent, message=TextMessage)
