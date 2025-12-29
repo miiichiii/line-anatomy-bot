@@ -590,6 +590,18 @@
                 sendStatus.className = 'text-sm text-red-600';
             }
         });
+
+        // --- disable course filter when "selected only" is on ---
+        function syncCourseFilterEnabled() {
+            courseFilter.disabled = sendSelectedOnly.checked;
+            if (courseFilter.disabled) {
+                courseFilter.classList.add('opacity-60');
+            } else {
+                courseFilter.classList.remove('opacity-60');
+            }
+        }
+        sendSelectedOnly.addEventListener('change', syncCourseFilterEnabled);
+        syncCourseFilterEnabled();
     });
 </script>
 </body>
