@@ -65,16 +65,32 @@ def get_student_info(user_id):
         logging.error(f"Firestoreからの学生情報取得エラー: {e}")
         return None
 
+def get_student_course(user_id):
+    if not db or not user_id:
+        return None
+    try:
+        doc_ref = db.collection('students').document(user_id)
+        doc = doc_ref.get()
+        if doc.exists:
+            return (doc.to_dict() or {}).get('course')
+        return None
+    except Exception as e:
+        logging.error(f"Firestoreからの学生コース取得エラー: {e}")
+        return None
+
 def record_attendance(user_id, student_info):
     if not db: return False
     try:
         doc_ref = db.collection('attendance_logs').document()
-        doc_ref.set({
+        payload = {
             'user_id': user_id,
             'student_id': student_info.get('student_id'),
             'name': student_info.get('name'),
             'timestamp': firestore.SERVER_TIMESTAMP
-        })
+        }
+        if student_info.get('course'):
+            payload['course'] = student_info.get('course')
+        doc_ref.set(payload)
         return True
     except Exception as e:
         logging.error(f"Firestoreへの出席記録エラー: {e}")
@@ -144,6 +160,10 @@ def fetch_attendance_logs(date_str):
         else:
             timestamp_str = "N/A"
 
+        course = log.get('course')
+        if not course:
+            course = get_student_course(log.get('user_id'))
+
         results.append({
             "log_id": doc.id,
             "timestamp": timestamp_str,
@@ -151,7 +171,7 @@ def fetch_attendance_logs(date_str):
             "name": log.get('name', 'N/A'),
             "is_first_time": log.get('is_first_time', False),
             "user_id": log.get('user_id'),
-            "course": log.get('course')
+            "course": course
         })
 
     return results
@@ -272,15 +292,30 @@ def set_course():
     if course not in {"PT", "OT", "NS", ""}:
         return jsonify({"error": "コース指定が不正です。"}), 400
 
-    if not db:
-        return jsonify({"error": "データベース接続エラー"}), 500
-
     try:
-        doc_ref = db.collection('attendance_logs').document(log_id)
+        if not db:
+            return jsonify({"error": "データベース接続エラー"}), 500
+
+        log_ref = db.collection('attendance_logs').document(log_id)
+        log_doc = log_ref.get()
+        if not log_doc.exists:
+            return jsonify({"error": "出席ログが見つかりません。"}), 404
+
+        log_data = log_doc.to_dict() or {}
+        user_id = log_data.get('user_id')
+
         if course == "":
-            doc_ref.update({"course": firestore.DELETE_FIELD})
+            log_ref.update({"course": firestore.DELETE_FIELD})
         else:
-            doc_ref.update({"course": course})
+            log_ref.update({"course": course})
+
+        if user_id:
+            student_ref = db.collection('students').document(user_id)
+            if course == "":
+                student_ref.update({"course": firestore.DELETE_FIELD})
+            else:
+                student_ref.update({"course": course})
+
         return jsonify({"ok": True, "course": course})
     except Exception as e:
         logging.error(f"コース更新エラー: {e}")
