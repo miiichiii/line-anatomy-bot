@@ -44,7 +44,7 @@ RADIUS_M = 300
 # --- ユーザーの状態を管理 ---
 user_states = {}
 
-# --- 関数定義 (省略... 変更なし) ---
+# --- 関数定義 ---
 def distance(lat1, lng1, lat2, lng2):
     R = 6371000
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
@@ -131,23 +131,14 @@ def fetch_attendance_logs(date_str):
     if not db:
         raise RuntimeError("データベース接続エラー")
 
-    # JSTタイムゾーンを定義
     jst = timezone(timedelta(hours=9))
-
-    # 指定された日付の開始時刻 (JST)
     start_dt_jst = datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=jst)
-
-    # 指定された日付の終了時刻 (JST)
     end_dt_jst = start_dt_jst + timedelta(days=1)
-
-    # FirestoreはUTCでクエリをかけるため、UTCに変換
     start_dt_utc = start_dt_jst.astimezone(timezone.utc)
     end_dt_utc = end_dt_jst.astimezone(timezone.utc)
 
-    # Firestoreからデータをクエリ
     logs_ref = db.collection('attendance_logs')
     query = logs_ref.where('timestamp', '>=', start_dt_utc).where('timestamp', '<', end_dt_utc).order_by('timestamp')
-
     docs = query.stream()
 
     results = []
@@ -155,7 +146,6 @@ def fetch_attendance_logs(date_str):
         log = doc.to_dict()
         ts = log.get('timestamp')
         if ts:
-            # 表示用にJSTの文字列に変換
             timestamp_str = ts.astimezone(jst).strftime('%H:%M:%S')
         else:
             timestamp_str = "N/A"
@@ -173,7 +163,6 @@ def fetch_attendance_logs(date_str):
             "user_id": log.get('user_id'),
             "course": course
         })
-
     return results
 
 # --- Webhookルート ---
@@ -191,16 +180,10 @@ def webhook():
 def health_check():
     return "OK", 200
 
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-# ★【新規追加】ビューアページを表示するためのルート ★
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 @app.route("/viewer")
 def viewer():
     return render_template('viewer.html')
 
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-# ★【新規追加】日付ごとの出席データをFirestoreから取得するためのAPIルート ★
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 @app.route("/get_attendance")
 def get_attendance():
     secret_key = request.args.get('key')
@@ -218,14 +201,10 @@ def get_attendance():
             for log in results
         ]
         return jsonify(sanitized)
-
     except Exception as e:
         logging.error(f"出席データ取得エラー: {e}")
         return jsonify({"error": f"データ取得中にエラーが発生しました: {e}"}), 500
 
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-# ★【新規追加】日付ごとの出席者にメッセージを送信するAPIルート ★
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 @app.route("/send_message", methods=["POST"])
 def send_message():
     data = request.get_json(silent=True) or {}
@@ -255,12 +234,10 @@ def send_message():
             logs = [log for log in logs if (log.get('course') or '').upper() == course]
         user_ids = [log.get('user_id') for log in logs if log.get('user_id')]
 
-        # 重複を除外（順序維持）
         seen = set()
         targets = []
         for uid in user_ids:
-            if uid in seen:
-                continue
+            if uid in seen: continue
             seen.add(uid)
             targets.append(uid)
 
@@ -276,14 +253,10 @@ def send_message():
                 failed += 1
 
         return jsonify({"sent": len(targets) - failed, "target": len(targets), "failed": failed})
-
     except Exception as e:
         logging.error(f"メッセージ送信APIエラー: {e}")
         return jsonify({"error": f"送信中にエラーが発生しました: {e}"}), 500
 
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-# ★【新規追加】出席ログのコース(PT/OT/NS)を更新するAPIルート ★
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 @app.route("/set_course", methods=["POST"])
 def set_course():
     data = request.get_json(silent=True) or {}
@@ -328,7 +301,7 @@ def set_course():
         return jsonify({"error": f"更新中にエラーが発生しました: {e}"}), 500
 
 # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-# ★【新規追加】コース別の学生一覧を取得するAPIルート ★
+# ★【修正】コース別の学生一覧を取得するAPIルート（ALL対応） ★
 # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 @app.route("/students_by_course")
 def students_by_course():
@@ -337,14 +310,21 @@ def students_by_course():
         return jsonify({"error": "アクセス権がありません。"}), 403
 
     course = (request.args.get('course') or '').strip().upper()
-    if course not in {"PT", "OT", "NS"}:
+    # ALL を許可するように変更
+    if course not in {"PT", "OT", "NS", "ALL"}:
         return jsonify({"error": "コース指定が不正です。"}), 400
 
     if not db:
         return jsonify({"error": "データベース接続エラー"}), 500
 
     try:
-        docs = db.collection('students').where('course', '==', course).stream()
+        if course == "ALL":
+            # コース指定なしで全件取得
+            docs = db.collection('students').stream()
+        else:
+            # 特定コースでフィルタ
+            docs = db.collection('students').where('course', '==', course).stream()
+            
         results = []
         for doc in docs:
             data = doc.to_dict() or {}
@@ -352,7 +332,7 @@ def students_by_course():
                 "user_id": doc.id,
                 "student_id": data.get('student_id', 'N/A'),
                 "name": data.get('name', 'N/A'),
-                "course": data.get('course', course)
+                "course": data.get('course', '未設定')
             })
         results.sort(key=lambda r: r.get('student_id', ''))
         return jsonify(results)
@@ -360,9 +340,6 @@ def students_by_course():
         logging.error(f"学生一覧取得エラー: {e}")
         return jsonify({"error": f"取得中にエラーが発生しました: {e}"}), 500
 
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-# ★【新規追加】学生一覧から選択した学生へメッセージ送信するAPIルート ★
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 @app.route("/send_message_students", methods=["POST"])
 def send_message_students():
     data = request.get_json(silent=True) or {}
@@ -377,12 +354,10 @@ def send_message_students():
     if not isinstance(user_ids, list) or not user_ids:
         return jsonify({"error": "送信対象が指定されていません。"}), 400
 
-    # 重複除外（順序維持）
     seen = set()
     targets = []
     for uid in user_ids:
-        if not uid or uid in seen:
-            continue
+        if not uid or uid in seen: continue
         seen.add(uid)
         targets.append(uid)
 
@@ -396,7 +371,6 @@ def send_message_students():
 
     return jsonify({"sent": len(targets) - failed, "target": len(targets), "failed": failed})
 
-# --- メッセージハンドラ (省略... 変更なし) ---
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text(event):
     user_id = event.source.user_id
@@ -406,12 +380,10 @@ def handle_text(event):
     if current_state == 'awaiting_student_id':
         user_states[user_id] = {'state': 'awaiting_name', 'student_id': text}
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="次に、氏名をフルネームで送信してください。"))
-    
     elif current_state == 'awaiting_name':
         user_states[user_id]['name'] = text
         user_states[user_id]['state'] = 'awaiting_location'
         send_liff_button(event.reply_token, "✅ 登録情報を受け付けました。\n最後に、下のボタンから現在地を送信して、初回出席を完了してください。")
-
     elif text == "出席":
         student_info = get_student_info(user_id)
         if student_info:
@@ -419,7 +391,6 @@ def handle_text(event):
         else:
             user_states[user_id] = {'state': 'awaiting_student_id'}
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="出席登録の前に、初回登録が必要です。\n学籍番号を送信してください。"))
-    
     else:
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="「出席」と送信してください。"))
 
@@ -446,15 +417,12 @@ def handle_location(event):
         if not student_info:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ エラー：学生情報が見つかりません。お手数ですが、再度「出席」と送信してください。"))
             return
-        
         if record_attendance(user_id, student_info):
             reply_text = f"✅ {student_info.get('name')}さん（{student_info.get('student_id')}）の出席を登録しました。"
         else:
             reply_text = "❌ 出席を受け付けましたが、台帳への記録に失敗しました。"
-        
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
-# --- サーバー起動 ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
