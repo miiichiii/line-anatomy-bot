@@ -244,15 +244,16 @@ def send_message():
         if not targets:
             return jsonify({"sent": 0, "target": 0, "failed": 0})
 
-        failed = 0
-        for uid in targets:
-            try:
-                line_bot_api.push_message(uid, TextSendMessage(text=message))
-            except Exception as e:
-                logging.error(f"メッセージ送信エラー: {uid} {e}")
-                failed += 1
-
-        return jsonify({"sent": len(targets) - failed, "target": len(targets), "failed": failed})
+        try:
+            # 500人ずつ分割して送信 (LINE Multicastの制限)
+            for i in range(0, len(targets), 500):
+                batch = targets[i:i + 500]
+                line_bot_api.multicast(batch, TextSendMessage(text=message))
+            
+            return jsonify({"sent": len(targets), "target": len(targets), "failed": 0})
+        except Exception as e:
+            logging.error(f"メッセージ送信エラー: {e}")
+            return jsonify({"error": f"送信中にエラーが発生しました: {e}"}), 500
     except Exception as e:
         logging.error(f"メッセージ送信APIエラー: {e}")
         return jsonify({"error": f"送信中にエラーが発生しました: {e}"}), 500
@@ -361,15 +362,16 @@ def send_message_students():
         seen.add(uid)
         targets.append(uid)
 
-    failed = 0
-    for uid in targets:
-        try:
-            line_bot_api.push_message(uid, TextSendMessage(text=message))
-        except Exception as e:
-            logging.error(f"メッセージ送信エラー: {uid} {e}")
-            failed += 1
-
-    return jsonify({"sent": len(targets) - failed, "target": len(targets), "failed": failed})
+    try:
+        # 500人ずつ分割して送信 (LINE Multicastの制限)
+        for i in range(0, len(targets), 500):
+            batch = targets[i:i + 500]
+            line_bot_api.multicast(batch, TextSendMessage(text=message))
+        
+        return jsonify({"sent": len(targets), "target": len(targets), "failed": 0})
+    except Exception as e:
+        logging.error(f"メッセージ送信エラー: {e}")
+        return jsonify({"error": f"送信中にエラーが発生しました: {e}"}), 500
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text(event):
